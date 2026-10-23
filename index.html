@@ -243,14 +243,17 @@
                 <div class="flex flex-wrap justify-between items-center bg-tech-card p-4 rounded-2xl border border-tech-border gap-4">
                     <div>
                         <h2 class="text-lg font-bold text-white">แดชบอร์ดแอดมิน (Admin Dashboard)</h2>
-                        <p class="text-xs text-slate-400">จัดการข้อมูลและส่งออกรายงานการจองที่นั่ง</p>
+                        <p class="text-xs text-slate-400">จัดการระบบและควบคุมการจองที่นั่ง</p>
                     </div>
-                    <div class="flex items-center space-x-3">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button id="btnToggleSystem" onclick="toggleBookingSystem()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all flex items-center">
+                            <i class="fa-solid fa-lock mr-1.5"></i> ปิดระบบการจอง (ล็อกถาวร)
+                        </button>
                         <button onclick="exportToCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-all flex items-center">
                             <i class="fa-solid fa-file-excel mr-1.5"></i> ส่งออกเป็น CSV
                         </button>
-                        <button onclick="clearAllBookings()" class="px-4 py-2 bg-rose-600/80 hover:bg-rose-600 text-white font-medium text-xs rounded-xl transition-all flex items-center">
-                            <i class="fa-solid fa-trash-can mr-1.5"></i> ล้างข้อมูลการจองทั้งหมด
+                        <button onclick="clearAllBookings()" class="px-4 py-2 bg-slate-700 hover:bg-rose-600 text-white font-medium text-xs rounded-xl transition-all flex items-center">
+                            <i class="fa-solid fa-trash-can mr-1.5"></i> ล้างข้อมูลทั้งหมด
                         </button>
                     </div>
                 </div>
@@ -284,7 +287,10 @@
         let seatsData = {};
         let selectedSeatId = null;
         let globalTimerInterval = null;
-        const STORAGE_KEY = 'sci_math_seats_db_v7';
+        let isBookingClosed = false;
+        const STORAGE_KEY = 'sci_math_seats_db_v9';
+        const STATUS_KEY = 'sci_math_booking_closed_v9';
+        const MY_BOOKING_KEY = 'sci_math_my_booked_number_v9';
 
         function initSeatsData() {
             const groups = ['Left', 'Center', 'Right'];
@@ -306,9 +312,40 @@
                 }
             });
             loadLocalSeats();
+            checkMyExistingBooking();
+        }
+
+        function checkMyExistingBooking() {
+            const myNum = localStorage.getItem(MY_BOOKING_KEY);
+            if (myNum) {
+                // Check if this number is still booked in database
+                let found = false;
+                Object.values(seatsData).forEach(s => {
+                    if (s.status === 'booked' && s.studentNumber === myNum) {
+                        found = true;
+                    }
+                });
+                if (found) {
+                    lockUIForBookedUser(myNum);
+                } else {
+                    localStorage.removeItem(MY_BOOKING_KEY);
+                }
+            }
+        }
+
+        function lockUIForBookedUser(myNum) {
+            document.getElementById('activeTimerLabel').innerText = "คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว";
+            document.getElementById('timerDisplay').innerText = "DONE";
+            const nameInput = document.getElementById('studentName');
+            const numInput = document.getElementById('studentNumber');
+            if (nameInput) nameInput.disabled = true;
+            if (numInput) numInput.disabled = true;
         }
 
         function loadLocalSeats() {
+            const closedStatus = localStorage.getItem(STATUS_KEY);
+            isBookingClosed = closedStatus === 'true';
+
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
@@ -329,13 +366,45 @@
             }
             renderSeats();
             renderAdminTable();
+            updateSystemStateUI();
             checkActiveTimerSync();
+            checkMyExistingBooking();
         }
 
         function saveLocalSeats() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(seatsData));
+            localStorage.setItem(STATUS_KEY, isBookingClosed);
             renderSeats();
             renderAdminTable();
+            updateSystemStateUI();
+        }
+
+        function updateSystemStateUI() {
+            const toggleBtn = document.getElementById('btnToggleSystem');
+            if (toggleBtn) {
+                if (isBookingClosed) {
+                    toggleBtn.className = "px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-all flex items-center";
+                    toggleBtn.innerHTML = `<i class="fa-solid fa-lock-open mr-1.5"></i> เปิดระบบการจอง`;
+                } else {
+                    toggleBtn.className = "px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all flex items-center";
+                    toggleBtn.innerHTML = `<i class="fa-solid fa-lock mr-1.5"></i> ปิดระบบการจอง (ล็อกถาวร)`;
+                }
+            }
+
+            if (isBookingClosed && !localStorage.getItem(MY_BOOKING_KEY)) {
+                document.getElementById('activeTimerLabel').innerText = "ระบบการจองถูกปิดโดยแอดมินแล้ว (สิ้นสุดการจอง)";
+            }
+        }
+
+        function toggleBookingSystem() {
+            isBookingClosed = !isBookingClosed;
+            if (isBookingClosed) {
+                if (selectedSeatId) resetSelection(true);
+                alert("ปิดระบบการจองเรียบร้อยแล้ว นักเรียนจะไม่สามารถกดจองได้อีก");
+            } else {
+                alert("เปิดระบบการจองใหม่อีกครั้ง");
+            }
+            saveLocalSeats();
         }
 
         function renderSeats() {
@@ -352,20 +421,30 @@
                 btn.type = 'button';
                 btn.className = `seat-btn p-2.5 rounded-xl flex flex-col items-center justify-center font-bold text-xs transition-all w-full `;
                 
-                if (seat.status === 'booked') {
-                    btn.classList.add('seat-booked');
-                    btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
-                } else if (seat.status === 'selected') {
-                    btn.classList.add('seat-selected');
-                    if (selectedSeatId && selectedSeatId !== seat.id) {
-                        btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">มีผู้เลือก</span>`;
+                if (isBookingClosed) {
+                    if (seat.status === 'booked') {
+                        btn.className += ' seat-booked';
+                        btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
                     } else {
-                        btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
+                        btn.className += ' bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed opacity-60';
+                        btn.innerHTML = `<i class="fa-solid fa-ban mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ปิดจอง</span>`;
                     }
                 } else {
-                    btn.classList.add('seat-available');
-                    btn.innerHTML = `<i class="fa-solid fa-chair mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ว่าง</span>`;
-                    btn.onclick = () => selectSeat(seat.id);
+                    if (seat.status === 'booked') {
+                        btn.classList.add('seat-booked');
+                        btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
+                    } else if (seat.status === 'selected') {
+                        btn.classList.add('seat-selected');
+                        if (selectedSeatId && selectedSeatId !== seat.id) {
+                            btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">มีผู้เลือก</span>`;
+                        } else {
+                            btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
+                        }
+                    } else {
+                        btn.classList.add('seat-available');
+                        btn.innerHTML = `<i class="fa-solid fa-chair mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ว่าง</span>`;
+                        btn.onclick = () => selectSeat(seat.id);
+                    }
                 }
 
                 if (containers[seat.group]) {
@@ -375,9 +454,18 @@
         }
 
         function selectSeat(seatId) {
-            loadLocalSeats(); // Pull latest state before selecting to prevent race conditions
+            if (localStorage.getItem(MY_BOOKING_KEY)) {
+                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
+                return;
+            }
 
-            // Check if seat is already taken by others
+            if (isBookingClosed) {
+                alert("ระบบการจองถูกปิดโดยแอดมินแล้ว ไม่สามารถเลือกโต๊ะได้");
+                return;
+            }
+
+            loadLocalSeats();
+
             if (seatsData[seatId].status === 'booked') {
                 alert("ขออภัย! โต๊ะนี้ถูกผู้อื่นจองตัดหน้าไปแล้ว");
                 return;
@@ -392,7 +480,7 @@
                     }
                 });
                 if (alreadyHasSeat) {
-                    alert("นักเรียนเลขที่นี้ได้ทำการจองหรือเลือกโต๊ะไปแล้ว ไม่สามารถจองซ้ำได้!");
+                    alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
                     return;
                 }
             }
@@ -430,9 +518,9 @@
                 const now = Date.now();
                 const timeLeft = seatsData[selectedSeatId].tempHoldUntil - now;
 
-                if (timeLeft <= 0) {
+                if (timeLeft <= 0 || isBookingClosed) {
                     clearInterval(globalTimerInterval);
-                    alert("หมดเวลาทำรายการ กรุณาเลือกโต๊ะใหม่อีกครั้ง");
+                    if (!isBookingClosed) alert("หมดเวลาทำรายการ กรุณาเลือกโต๊ะใหม่อีกครั้ง");
                     resetSelection(false);
                 } else {
                     const totalSecs = Math.floor(timeLeft / 1000);
@@ -446,6 +534,11 @@
 
         function checkActiveTimerSync() {
             loadLocalSeats();
+            if (localStorage.getItem(MY_BOOKING_KEY)) return;
+            if (isBookingClosed) {
+                resetSelection(true);
+                return;
+            }
             if (selectedSeatId && seatsData[selectedSeatId]) {
                 if (seatsData[selectedSeatId].status === 'selected' && seatsData[selectedSeatId].tempHoldUntil) {
                     const timeLeft = seatsData[selectedSeatId].tempHoldUntil - Date.now();
@@ -466,13 +559,14 @@
         }
 
         function resetSelection(silent) {
+            if (localStorage.getItem(MY_BOOKING_KEY)) return;
             if (selectedSeatId && seatsData[selectedSeatId] && seatsData[selectedSeatId].status === 'selected') {
                 seatsData[selectedSeatId].status = 'available';
                 seatsData[selectedSeatId].tempHoldUntil = null;
             }
             selectedSeatId = null;
             clearInterval(globalTimerInterval);
-            document.getElementById('activeTimerLabel').innerText = "กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง";
+            document.getElementById('activeTimerLabel').innerText = isBookingClosed ? "ระบบการจองถูกปิดโดยแอดมินแล้ว (สิ้นสุดการจอง)" : "กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง";
             document.getElementById('timerDisplay').innerText = "10:00";
             document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
             
@@ -485,6 +579,14 @@
 
         function handleFormSubmit(e) {
             e.preventDefault();
+            if (localStorage.getItem(MY_BOOKING_KEY)) {
+                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
+                return;
+            }
+            if (isBookingClosed) {
+                alert("ระบบการจองถูกปิดแล้ว ไม่สามารถส่งข้อมูลได้");
+                return;
+            }
             if (!selectedSeatId) return;
 
             loadLocalSeats();
@@ -510,7 +612,7 @@
             });
 
             if (alreadyBooked) {
-                alert("นักเรียนเลขที่นี้ได้ทำการจองที่นั่งไปแล้ว ไม่สามารถจองซ้ำได้อีก!");
+                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
                 resetSelection(false);
                 return;
             }
@@ -521,17 +623,18 @@
             seatsData[selectedSeatId].timestamp = new Date().toLocaleString('th-TH');
             seatsData[selectedSeatId].tempHoldUntil = null;
 
+            localStorage.setItem(MY_BOOKING_KEY, number);
             saveLocalSeats();
 
-            alert(`ยินดีด้วย! ยืนยันการจอง โต๊ะ ${selectedSeatId} สำเร็จ`);
+            alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
             
             document.getElementById('studentName').value = '';
             document.getElementById('studentNumber').value = '';
             selectedSeatId = null;
             clearInterval(globalTimerInterval);
-            document.getElementById('activeTimerLabel').innerText = "การจองสำเร็จสิ้นสุดสมบูรณ์";
-            document.getElementById('timerDisplay').innerText = "00:00";
-            document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
+            
+            lockUIForBookedUser(number);
+            document.getElementById('selectedSeatLabel').innerText = "จองสำเร็จแล้ว";
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = true;
@@ -605,7 +708,9 @@
                 seatsData[seatId].studentName = '';
                 seatsData[seatId].studentNumber = '';
                 seatsData[seatId].timestamp = null;
+                localStorage.removeItem(MY_BOOKING_KEY);
                 saveLocalSeats();
+                location.reload(); // Refresh to restore UI state
             }
         }
 
@@ -617,7 +722,9 @@
                     seatsData[id].studentNumber = '';
                     seatsData[id].timestamp = null;
                 });
+                localStorage.removeItem(MY_BOOKING_KEY);
                 saveLocalSeats();
+                location.reload();
             }
         }
 
@@ -643,7 +750,7 @@
 
         window.onload = function() {
             initSeatsData();
-            setInterval(loadLocalSeats, 1500); // Poll sync every 1.5 seconds for lightning-fast contest
+            setInterval(loadLocalSeats, 1500);
         };
     </script>
 </body>
