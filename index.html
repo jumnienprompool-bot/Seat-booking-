@@ -273,31 +273,11 @@
 
     </main>
 
-    <!-- Firebase SDK Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-
     <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyDemoKeySciMathClassroom2024",
-            authDomain: "sci-math-booking.firebaseapp.com",
-            projectId: "sci-math-booking",
-            storageBucket: "sci-math-booking.appspot.com",
-            messagingSenderId: "123456789012",
-            appId: "1:123456789012:web:demo123456"
-        };
-
-        let db = null;
-        try {
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-        } catch (e) {
-            console.log("Firestore fallback to LocalStorage mode");
-        }
-
         let seatsData = {};
         let selectedSeatId = null;
         let globalTimerInterval = null;
+        const STORAGE_KEY = 'sci_math_seats_db_v6';
 
         function initSeatsData() {
             const groups = ['Left', 'Center', 'Right'];
@@ -322,7 +302,7 @@
         }
 
         function loadLocalSeats() {
-            const saved = localStorage.getItem('sci_math_seats_db_v5');
+            const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
                     const parsed = JSON.parse(saved);
@@ -346,7 +326,7 @@
         }
 
         function saveLocalSeats() {
-            localStorage.setItem('sci_math_seats_db_v5', JSON.stringify(seatsData));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(seatsData));
             renderSeats();
             renderAdminTable();
         }
@@ -371,7 +351,7 @@
                 } else if (seat.status === 'selected') {
                     btn.classList.add('seat-selected');
                     if (selectedSeatId && selectedSeatId !== seat.id) {
-                        btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">เลือกอยู่</span>`;
+                        btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">มีผู้เลือก</span>`;
                     } else {
                         btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
                     }
@@ -388,6 +368,23 @@
         }
 
         function selectSeat(seatId) {
+            // Check if this student already booked or selected a seat
+            const nameInput = document.getElementById('studentName').value.trim();
+            const numberInput = document.getElementById('studentNumber').value.trim();
+
+            if (nameInput && numberInput) {
+                let alreadyHasSeat = false;
+                Object.values(seatsData).forEach(s => {
+                    if ((s.status === 'booked' || s.status === 'selected') && s.studentNumber === numberInput) {
+                        alreadyHasSeat = true;
+                    }
+                });
+                if (alreadyHasSeat) {
+                    alert("นักเรียนเลขที่นี้ได้ทำการจองหรือเลือกโต๊ะไปแล้ว ไม่สามารถจองซ้ำได้!");
+                    return;
+                }
+            }
+
             if (selectedSeatId && seatsData[selectedSeatId] && seatsData[selectedSeatId].status === 'selected') {
                 seatsData[selectedSeatId].status = 'available';
                 seatsData[selectedSeatId].tempHoldUntil = null;
@@ -481,6 +478,20 @@
 
             if (!name || !number) {
                 alert("กรุณากรอกข้อมูลให้ครบถ้วน");
+                return;
+            }
+
+            // Double check if student number already booked
+            let alreadyBooked = false;
+            Object.values(seatsData).forEach(s => {
+                if (s.status === 'booked' && s.studentNumber === number) {
+                    alreadyBooked = true;
+                }
+            });
+
+            if (alreadyBooked) {
+                alert("นักเรียนเลขที่นี้ได้ทำการจองที่นั่งไปแล้ว ไม่สามารถจองซ้ำได้อีก!");
+                resetSelection(false);
                 return;
             }
 
