@@ -46,33 +46,31 @@
             box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
             border: 1px solid rgba(56, 189, 248, 0.3);
         }
-        .seat-btn {
+        .seat-card {
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(15, 23, 42, 0.9);
         }
-        .seat-btn:hover:not(:disabled) {
-            transform: translateY(-3px) scale(1.05);
-            box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+        .seat-card:hover:not(.seat-booked-card) {
+            transform: translateY(-3px);
+            border-color: #00f0ff;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
         }
         .seat-available {
-            background: rgba(16, 185, 129, 0.15);
             border: 1.5px solid #10b981;
-            color: #34d399;
         }
         .seat-selected {
-            background: rgba(245, 158, 11, 0.2);
             border: 2px solid #f59e0b;
-            color: #fbbf24;
+            background: rgba(245, 158, 11, 0.1);
             animation: pulse-border 1.5s infinite;
         }
-        .seat-booked {
-            background: rgba(239, 68, 68, 0.15);
+        .seat-booked-card {
             border: 1.5px solid #ef4444;
-            color: #f87171;
+            background: rgba(239, 68, 68, 0.1);
             cursor: not-allowed;
         }
         @keyframes pulse-border {
-            0%, 100% { box-shadow: 0 0 5px rgba(245, 158, 11, 0.4); }
-            50% { box-shadow: 0 0 18px rgba(245, 158, 11, 0.8); }
+            0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.4); }
+            50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.8); }
         }
         .timer-display {
             font-family: 'Orbitron', monospace;
@@ -109,30 +107,30 @@
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-4 mt-6">
+    <main class="max-w-5xl mx-auto px-4 mt-6">
 
         <!-- ================= USER VIEW ================= -->
         <div id="userTab" class="space-y-6">
             
             <!-- Classroom Layout Board -->
-            <div class="bg-tech-card rounded-2xl p-4 md:p-6 glow-box">
+            <div class="bg-tech-card rounded-2xl p-6 glow-box">
                 
                 <!-- Front Board -->
-                <div class="mb-8 text-center">
+                <div class="mb-6 text-center">
                     <div class="max-w-md mx-auto py-3 bg-gradient-to-r from-cyan-950/80 via-slate-900 to-cyan-950/80 border border-tech-cyan/40 rounded-xl text-tech-cyan font-semibold text-sm tracking-widest shadow-inner">
-                        <i class="fa-solid fa-chalkboard text-base mr-2"></i> กระดานดำหน้าห้องเรียน / จออัจฉริยะ (SMART BOARD)
+                        <i class="fa-solid fa-chalkboard text-base mr-2"></i> กระดานดำหน้าห้องเรียน / SMART BOARD
                     </div>
                 </div>
 
                 <!-- Seat Status Legend -->
-                <div class="flex flex-wrap justify-center items-center gap-6 mb-8 text-xs md:text-sm bg-slate-950/40 py-2.5 px-4 rounded-xl border border-slate-800 w-fit mx-auto">
+                <div class="flex flex-wrap justify-center items-center gap-6 mb-6 text-xs md:text-sm bg-slate-950/40 py-2.5 px-4 rounded-xl border border-slate-800 w-fit mx-auto">
                     <div class="flex items-center space-x-2">
                         <span class="w-3.5 h-3.5 rounded-full bg-emerald-500/20 border border-emerald-400 inline-block"></span>
                         <span class="text-slate-300">ว่าง</span>
                     </div>
                     <div class="flex items-center space-x-2">
                         <span class="w-3.5 h-3.5 rounded-full bg-amber-500/30 border border-amber-400 inline-block"></span>
-                        <span class="text-slate-300">กำลังเลือก/รอยืนยัน</span>
+                        <span class="text-slate-300">กำลังเลือก</span>
                     </div>
                     <div class="flex items-center space-x-2">
                         <span class="w-3.5 h-3.5 rounded-full bg-rose-500/20 border border-rose-400 inline-block"></span>
@@ -140,33 +138,9 @@
                     </div>
                 </div>
 
-                <!-- 36 Seats Grid (3 Groups of 12) -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
-                    
-                    <!-- Group 1: Left -->
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
-                        <h3 class="text-center text-xs font-semibold text-tech-accent mb-4 uppercase tracking-wider border-b border-slate-800 pb-2">
-                            กลุ่มฝั่งซ้าย (Left)
-                        </h3>
-                        <div id="groupLeft" class="grid grid-cols-2 gap-3"></div>
-                    </div>
-
-                    <!-- Group 2: Center -->
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
-                        <h3 class="text-center text-xs font-semibold text-tech-accent mb-4 uppercase tracking-wider border-b border-slate-800 pb-2">
-                            กลุ่มตรงกลาง (Center)
-                        </h3>
-                        <div id="groupCenter" class="grid grid-cols-2 gap-3"></div>
-                    </div>
-
-                    <!-- Group 3: Right -->
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
-                        <h3 class="text-center text-xs font-semibold text-tech-accent mb-4 uppercase tracking-wider border-b border-slate-800 pb-2">
-                            กลุ่มฝั่งขวา (Right)
-                        </h3>
-                        <div id="groupRight" class="grid grid-cols-2 gap-3"></div>
-                    </div>
-
+                <!-- 36 Seats Grid Layout (Strict 3 columns, flowing down) -->
+                <div id="seatsGridContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
+                    <!-- Dynamic cards injected here -->
                 </div>
             </div>
 
@@ -200,7 +174,7 @@
                         <div id="timerContainer" class="hidden flex items-center space-x-3 bg-amber-500/10 border border-amber-500/30 px-4 py-2 rounded-xl">
                             <i class="fa-solid fa-stopwatch text-amber-400 text-xl animate-pulse"></i>
                             <div>
-                                <div class="text-[10px] text-amber-300 uppercase tracking-wider">เวลาที่เหลือในการจอง (กลาง)</div>
+                                <div class="text-[10px] text-amber-300 uppercase tracking-wider">เวลาที่เหลือในการจอง</div>
                                 <div id="timerDisplay" class="timer-display text-xl font-bold text-amber-400">10:00</div>
                             </div>
                         </div>
@@ -300,38 +274,32 @@
         let globalTimerInterval = null;
 
         function initSeatsData() {
-            for (let g = 0; g < 3; g++) {
-                const groupNames = ['Left', 'Center', 'Right'];
-                const groupKey = groupNames[g];
-                
-                for (let i = 1; i <= 12; i++) {
-                    const seatId = `${groupKey.charAt(0)}${i}`;
-                    if (!seatsData[seatId]) {
-                        seatsData[seatId] = {
-                            id: seatId,
-                            group: groupKey,
-                            number: i,
-                            status: 'available', // available, selected, booked
-                            studentName: '',
-                            studentNumber: '',
-                            timestamp: null,
-                            tempHoldUntil: null
-                        };
-                    }
+            // Generate 36 total seats sequentially (S1 to S36) arranged in 3 columns
+            for (let i = 1; i <= 36; i++) {
+                const seatId = `T${i}`;
+                if (!seatsData[seatId]) {
+                    seatsData[seatId] = {
+                        id: seatId,
+                        number: i,
+                        status: 'available',
+                        studentName: '',
+                        studentNumber: '',
+                        timestamp: null,
+                        tempHoldUntil: null
+                    };
                 }
             }
             loadLocalSeats();
         }
 
         function loadLocalSeats() {
-            const saved = localStorage.getItem('sci_math_seats_db_v2');
+            const saved = localStorage.getItem('sci_math_seats_db_v4');
             if (saved) {
                 try {
                     const parsed = JSON.parse(saved);
                     const now = Date.now();
                     
                     Object.keys(parsed).forEach(id => {
-                        // Check expired temporary holds
                         if (parsed[id].status === 'selected' && parsed[id].tempHoldUntil && now > parsed[id].tempHoldUntil) {
                             parsed[id].status = 'available';
                             parsed[id].tempHoldUntil = null;
@@ -349,61 +317,65 @@
         }
 
         function saveLocalSeats() {
-            localStorage.setItem('sci_math_seats_db_v2', JSON.stringify(seatsData));
+            localStorage.setItem('sci_math_seats_db_v4', JSON.stringify(seatsData));
             renderSeats();
             renderAdminTable();
         }
 
         function renderSeats() {
-            const containers = {
-                'Left': document.getElementById('groupLeft'),
-                'Center': document.getElementById('groupCenter'),
-                'Right': document.getElementById('groupRight')
-            };
-
-            Object.keys(containers).forEach(key => { if(containers[key]) containers[key].innerHTML = ''; });
+            const gridContainer = document.getElementById('seatsGridContainer');
+            if (!gridContainer) return;
+            gridContainer.innerHTML = '';
 
             Object.values(seatsData).forEach(seat => {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = `seat-btn p-3 rounded-xl flex flex-col items-center justify-center font-bold text-xs transition-all `;
+                const card = document.createElement('div');
+                card.className = `seat-card p-3 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer shadow-md `;
                 
                 if (seat.status === 'booked') {
-                    btn.classList.add('seat-booked');
-                    btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-sm"></i> โต๊ะ ${seat.id}<span class="text-[10px] font-normal opacity-80 mt-0.5 truncate max-w-[70px]">${seat.studentName}</span>`;
+                    card.classList.add('seat-booked-card');
+                    card.innerHTML = `
+                        <div class="text-xs text-rose-400 font-bold mb-1"><i class="fa-solid fa-user-check mr-1"></i> โต๊ะที่ ${seat.number}</div>
+                        <div class="text-sm font-bold text-white truncate max-w-[150px]">${seat.studentName}</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">เลขที่ ${seat.studentNumber} (จองแล้ว)</div>
+                    `;
                 } else if (seat.status === 'selected') {
-                    btn.classList.add('seat-selected');
-                    // If selected by another device
+                    card.classList.add('seat-selected');
                     if (selectedSeatId && selectedSeatId !== seat.id) {
-                        btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-sm"></i> โต๊ะ ${seat.id}<span class="text-[10px] font-normal mt-0.5">มีผู้กำลังเลือก</span>`;
+                        card.innerHTML = `
+                            <div class="text-xs text-amber-400 font-bold mb-1"><i class="fa-solid fa-lock mr-1"></i> โต๊ะที่ ${seat.number}</div>
+                            <div class="text-xs font-semibold text-amber-300">มีผู้กำลังเลือก</div>
+                        `;
                     } else {
-                        btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-sm animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[10px] font-normal mt-0.5">กำลังเลือก</span>`;
+                        card.innerHTML = `
+                            <div class="text-xs text-amber-400 font-bold mb-1"><i class="fa-solid fa-clock mr-1 animate-bounce"></i> โต๊ะที่ ${seat.number}</div>
+                            <div class="text-xs font-semibold text-amber-300">กำลังเลือกของคุณ</div>
+                        `;
                     }
                 } else {
-                    btn.classList.add('seat-available');
-                    btn.innerHTML = `<i class="fa-solid fa-chair mb-1 text-sm"></i> โต๊ะ ${seat.id}<span class="text-[10px] font-normal mt-0.5">ว่าง</span>`;
-                    btn.onclick = () => selectSeat(seat.id);
+                    card.classList.add('seat-available');
+                    card.innerHTML = `
+                        <div class="text-xs text-emerald-400 font-bold mb-1"><i class="fa-solid fa-chair mr-1"></i> โต๊ะที่ ${seat.number}</div>
+                        <div class="text-xs text-slate-300">ว่าง (คลิกเพื่อจอง)</div>
+                    `;
+                    card.onclick = () => selectSeat(seat.id);
                 }
 
-                if (containers[seat.group]) {
-                    containers[seat.group].appendChild(btn);
-                }
+                gridContainer.appendChild(card);
             });
         }
 
         function selectSeat(seatId) {
-            // Revert previous selection if any
             if (selectedSeatId && seatsData[selectedSeatId] && seatsData[selectedSeatId].status === 'selected') {
                 seatsData[selectedSeatId].status = 'available';
                 seatsData[selectedSeatId].tempHoldUntil = null;
             }
 
             selectedSeatId = seatId;
-            const holdDuration = 10 * 60 * 1000; // 10 minutes in ms
+            const holdDuration = 10 * 60 * 1000;
             seatsData[seatId].status = 'selected';
             seatsData[seatId].tempHoldUntil = Date.now() + holdDuration;
 
-            document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${seatId} (${seatsData[seatId].group})`;
+            document.getElementById('selectedSeatLabel').innerText = `โต๊ะที่ ${seatsData[seatId].number}`;
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = false;
@@ -446,7 +418,7 @@
                     const timeLeft = seatsData[selectedSeatId].tempHoldUntil - Date.now();
                     if (timeLeft > 0) {
                         document.getElementById('timerContainer').classList.remove('hidden');
-                        document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${selectedSeatId} (${seatsData[selectedSeatId].group})`;
+                        document.getElementById('selectedSeatLabel').innerText = `โต๊ะที่ ${seatsData[selectedSeatId].number}`;
                         const btnSubmit = document.getElementById('btnSubmit');
                         btnSubmit.disabled = false;
                         btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
@@ -495,7 +467,7 @@
             seatsData[selectedSeatId].timestamp = new Date().toLocaleString('th-TH');
             seatsData[selectedSeatId].tempHoldUntil = null;
 
-            alert(`ยืนยันการจอง โต๊ะ ${selectedSeatId} สำเร็จ!`);
+            alert(`ยืนยันการจอง โต๊ะที่ ${seatsData[selectedSeatId].number} สำเร็จ!`);
             
             document.getElementById('studentName').value = '';
             document.getElementById('studentNumber').value = '';
@@ -557,7 +529,7 @@
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-900/50 transition-all';
                 tr.innerHTML = `
-                    <td class="px-4 py-3 font-bold text-tech-cyan">โต๊ะ ${seat.id} (${seat.group})</td>
+                    <td class="px-4 py-3 font-bold text-tech-cyan">โต๊ะที่ ${seat.number}</td>
                     <td class="px-4 py-3">${seat.studentName}</td>
                     <td class="px-4 py-3">${seat.studentNumber}</td>
                     <td class="px-4 py-3 text-xs text-slate-400">${seat.timestamp || '-'}</td>
@@ -572,7 +544,7 @@
         }
 
         function cancelBooking(seatId) {
-            if (confirm(`คุณต้องการยกเลิกการจองโต๊ะ ${seatId} ใช่หรือไม่?`)) {
+            if (confirm(`คุณต้องการยกเลิกการจองโต๊ะที่ ${seatsData[seatId].number} ใช่หรือไม่?`)) {
                 seatsData[seatId].status = 'available';
                 seatsData[seatId].studentName = '';
                 seatsData[seatId].studentNumber = '';
@@ -600,9 +572,9 @@
                 return;
             }
 
-            let csvContent = "\uFEFFรหัสโต๊ะ,กลุ่ม,ชื่อ-นามสกุล,เลขที่,เวลาที่จอง\n";
+            let csvContent = "\uFEFFรหัสโต๊ะ,ชื่อ-นามสกุล,เลขที่,เวลาที่จอง\n";
             bookedSeats.forEach(s => {
-                csvContent += `"${s.id}","${s.group}","${s.studentName}","${s.studentNumber}","${s.timestamp}"\n`;
+                csvContent += `"โต๊ะที่ ${s.number}","${s.studentName}","${s.studentNumber}","${s.timestamp}"\n`;
             });
 
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -615,7 +587,6 @@
 
         window.onload = function() {
             initSeatsData();
-            // Real-time multi-device sync poll every 2 seconds
             setInterval(loadLocalSeats, 2000);
         };
     </script>
