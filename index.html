@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบจองที่นั่งห้องเรียนวิทย์-คณิต (Sci-Math Booking)</title>
+    <title>ระบบจองที่นั่งห้องเรียนวิทย์-คณิต (SeatUp Sci-Math Edition)</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -91,9 +91,9 @@
                 </div>
                 <div>
                     <h1 class="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-tech-cyan via-sky-300 to-blue-400">
-                        ระบบจองที่นั่งห้องเรียนวิทย์-คณิต
+                        SeatUp (Sci-Math Classroom)
                     </h1>
-                    <p class="text-xs text-slate-400">Sci-Math Classroom Seat Reservation System</p>
+                    <p class="text-xs text-slate-400">ระบบจัดการและจองที่นั่งห้องเรียนเรียลไทม์</p>
                 </div>
             </div>
 
@@ -122,7 +122,7 @@
                     </div>
                     <div>
                         <div class="text-xs text-amber-300 font-semibold tracking-wider uppercase">สถานะเวลาในการจองที่นั่ง</div>
-                        <div id="activeTimerLabel" class="text-sm text-slate-300 font-medium">รอแอดมินกดเริ่มเวลาเปิดจอง...</div>
+                        <div id="activeTimerLabel" class="text-sm text-slate-300 font-medium">รอแอดมินกดเริ่มนับเวลา...</div>
                     </div>
                 </div>
                 <div class="bg-slate-950/80 border border-amber-500/40 px-6 py-2.5 rounded-xl text-center">
@@ -156,10 +156,8 @@
                     </div>
                 </div>
 
-                <!-- 3 Main Sections/Rows (Group Left, Center, Right) -->
+                <!-- 3 Main Sections (Group Left, Center, Right) -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    
-                    <!-- Section 1: Left Row (3 cols x 4 rows) -->
                     <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
                         <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
                             แถวที่ 1 (ฝั่งซ้าย)
@@ -167,7 +165,6 @@
                         <div id="groupLeft" class="grid grid-cols-3 gap-2"></div>
                     </div>
 
-                    <!-- Section 2: Center Row (3 cols x 4 rows) -->
                     <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
                         <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
                             แถวที่ 2 (ตรงกลาง)
@@ -175,18 +172,16 @@
                         <div id="groupCenter" class="grid grid-cols-3 gap-2"></div>
                     </div>
 
-                    <!-- Section 3: Right Row (3 cols x 4 rows) -->
                     <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
                         <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
                             แถวที่ 3 (ฝั่งขวา)
                         </div>
                         <div id="groupRight" class="grid grid-cols-3 gap-2"></div>
                     </div>
-
                 </div>
             </div>
 
-            <!-- Booking Form & Confirmation -->
+            <!-- Booking Form -->
             <div class="bg-tech-card rounded-2xl p-6 glow-box">
                 <h2 class="text-lg font-bold text-white mb-4 flex items-center">
                     <i class="fa-solid fa-pen-to-square text-tech-cyan mr-2"></i> ฟอร์มลงทะเบียนจองที่นั่ง
@@ -224,8 +219,6 @@
 
         <!-- ================= ADMIN VIEW ================= -->
         <div id="adminTab" class="hidden space-y-6">
-            
-            <!-- Admin Login Box -->
             <div id="adminAuthBox" class="max-w-md mx-auto bg-tech-card rounded-2xl p-6 glow-box text-center space-y-4">
                 <div class="w-12 h-12 bg-tech-cyan/10 border border-tech-cyan/30 rounded-full flex items-center justify-center mx-auto text-tech-cyan text-xl">
                     <i class="fa-solid fa-lock"></i>
@@ -238,7 +231,6 @@
                 </button>
             </div>
 
-            <!-- Admin Content (Hidden until login) -->
             <div id="adminContent" class="hidden space-y-6">
                 <div class="flex flex-wrap justify-between items-center bg-tech-card p-4 rounded-2xl border border-tech-border gap-4">
                     <div>
@@ -261,7 +253,6 @@
                     </div>
                 </div>
 
-                <!-- Booked Table -->
                 <div class="bg-tech-card rounded-2xl border border-tech-border overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-sm text-slate-300">
@@ -275,49 +266,76 @@
                                 </tr>
                             </thead>
                             <tbody id="adminTableBody" class="divide-y divide-slate-800/60">
-                                <!-- Dynamic rows -->
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
-
         </div>
 
     </main>
 
+    <!-- Firebase Realtime SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
     <script>
+        // Firebase Public Central Cloud Engine
+        const firebaseConfig = {
+            databaseURL: "https://sci-math-seatup-default-rtdb.asia-southeast1.firebasedatabase.app"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
         let seatsData = {};
         let selectedSeatId = null;
         let isBookingClosed = false;
-        const STORAGE_KEY = 'sci_math_seats_db_v12';
-        const STATUS_KEY = 'sci_math_booking_closed_v12';
-        const MY_BOOKING_KEY = 'sci_math_my_booked_number_v12';
-        const GLOBAL_TIMER_KEY = 'sci_math_global_timer_end_v12';
+        let globalTimerEnd = null;
+        let countdownInterval = null;
+        const MY_BOOKING_KEY = 'sci_math_my_booked_num_v13';
 
-        function initSeatsData() {
+        // 1. REALTIME SYNC - Listen to global Database
+        function initRealtimeSync() {
+            db.ref('seats').on('value', (snapshot) => {
+                seatsData = snapshot.val() || generateInitialSeats();
+                renderSeats();
+                renderAdminTable();
+            });
+
+            db.ref('system_status').on('value', (snapshot) => {
+                const status = snapshot.val() || {};
+                isBookingClosed = status.isClosed || false;
+                globalTimerEnd = status.timerEnd || null;
+
+                updateSystemUI();
+                startCountdownLoop();
+            });
+
+            checkMyLocalBookingStatus();
+        }
+
+        function generateInitialSeats() {
+            const initial = {};
             const groups = ['Left', 'Center', 'Right'];
             groups.forEach(groupKey => {
                 for (let i = 1; i <= 12; i++) {
                     const seatId = `${groupKey.charAt(0)}${i}`;
-                    if (!seatsData[seatId]) {
-                        seatsData[seatId] = {
-                            id: seatId,
-                            group: groupKey,
-                            number: i,
-                            status: 'available',
-                            studentName: '',
-                            studentNumber: '',
-                            timestamp: null,
-                            tempHoldUntil: null
-                        };
-                    }
+                    initial[seatId] = {
+                        id: seatId,
+                        group: groupKey,
+                        number: i,
+                        status: 'available',
+                        studentName: '',
+                        studentNumber: '',
+                        timestamp: null
+                    };
                 }
             });
-            loadLocalSeats();
+            return initial;
         }
 
-        function checkMyExistingBooking() {
+        function checkMyLocalBookingStatus() {
             const myNum = localStorage.getItem(MY_BOOKING_KEY);
             if (myNum) {
                 let found = false;
@@ -328,12 +346,10 @@
                 });
                 if (found) {
                     lockUIForBookedUser(myNum);
-                    return true;
                 } else {
                     localStorage.removeItem(MY_BOOKING_KEY);
                 }
             }
-            return false;
         }
 
         function lockUIForBookedUser(myNum) {
@@ -341,14 +357,8 @@
             document.getElementById('timerDisplay').innerText = "DONE";
             const nameInput = document.getElementById('studentName');
             const numInput = document.getElementById('studentNumber');
-            if (nameInput) {
-                nameInput.value = "";
-                nameInput.disabled = true;
-            }
-            if (numInput) {
-                numInput.value = myNum;
-                numInput.disabled = true;
-            }
+            if (nameInput) { nameInput.value = ""; nameInput.disabled = true; }
+            if (numInput) { numInput.value = myNum; numInput.disabled = true; }
             const btnSubmit = document.getElementById('btnSubmit');
             if (btnSubmit) {
                 btnSubmit.disabled = true;
@@ -356,74 +366,37 @@
             }
         }
 
-        function loadLocalSeats() {
-            const closedStatus = localStorage.getItem(STATUS_KEY);
-            isBookingClosed = closedStatus === 'true';
-
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                try {
-                    const parsed = JSON.parse(saved);
-                    const now = Date.now();
-                    
-                    Object.keys(parsed).forEach(id => {
-                        if (parsed[id].status === 'selected' && parsed[id].tempHoldUntil && now > parsed[id].tempHoldUntil) {
-                            parsed[id].status = 'available';
-                            parsed[id].tempHoldUntil = null;
-                            if (selectedSeatId === id) {
-                                resetSelection(true);
-                            }
-                        }
-                    });
-                    seatsData = parsed;
-                } catch(e) {}
-            }
-            renderSeats();
-            renderAdminTable();
-            updateSystemStateUI();
-            syncGlobalCountdownUI();
-            checkMyExistingBooking();
-        }
-
-        function saveLocalSeats() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(seatsData));
-            localStorage.setItem(STATUS_KEY, isBookingClosed);
-            renderSeats();
-            renderAdminTable();
-            updateSystemStateUI();
-        }
-
-        function adminTriggerStartTimer() {
-            const duration = 10 * 60 * 1000; // 10 minutes
-            const endTime = Date.now() + duration;
-            localStorage.setItem(GLOBAL_TIMER_KEY, endTime);
-            syncGlobalCountdownUI();
-            alert("เริ่มนับเวลาถอยหลัง 10 นาทีสำหรับทุกคนแล้ว!");
-        }
-
-        function syncGlobalCountdownUI() {
-            const endTime = localStorage.getItem(GLOBAL_TIMER_KEY);
-            if (!endTime) return;
-
-            const now = Date.now();
-            const timeLeft = parseInt(endTime) - now;
-
-            if (timeLeft <= 0) {
-                document.getElementById('timerDisplay').innerText = "00:00";
-                document.getElementById('activeTimerLabel').innerText = "หมดเวลาการจองที่นั่งแล้ว";
-            } else {
-                const totalSecs = Math.floor(timeLeft / 1000);
-                const mins = Math.floor(totalSecs / 60);
-                const secs = totalSecs % 60;
-                document.getElementById('timerDisplay').innerText = 
-                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                if (!localStorage.getItem(MY_BOOKING_KEY)) {
-                    document.getElementById('activeTimerLabel').innerText = "ระบบเปิดให้จองที่นั่งแล้ว กำลังนับเวลาถอยหลัง...";
+        function startCountdownLoop() {
+            clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
+                if (!globalTimerEnd) {
+                    document.getElementById('timerDisplay').innerText = "10:00";
+                    if (!localStorage.getItem(MY_BOOKING_KEY)) {
+                        document.getElementById('activeTimerLabel').innerText = "รอแอดมินกดเริ่มนับเวลา...";
+                    }
+                    return;
                 }
-            }
+
+                const timeLeft = globalTimerEnd - Date.now();
+                if (timeLeft <= 0) {
+                    document.getElementById('timerDisplay').innerText = "00:00";
+                    if (!localStorage.getItem(MY_BOOKING_KEY)) {
+                        document.getElementById('activeTimerLabel').innerText = "หมดเวลาการจองที่นั่งแล้ว";
+                    }
+                } else {
+                    const totalSecs = Math.floor(timeLeft / 1000);
+                    const mins = Math.floor(totalSecs / 60);
+                    const secs = totalSecs % 60;
+                    document.getElementById('timerDisplay').innerText = 
+                        `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    if (!localStorage.getItem(MY_BOOKING_KEY)) {
+                        document.getElementById('activeTimerLabel').innerText = "ระบบเปิดให้จองแล้ว กำลังนับเวลาถอยหลัง...";
+                    }
+                }
+            }, 500);
         }
 
-        function updateSystemStateUI() {
+        function updateSystemUI() {
             const toggleBtn = document.getElementById('btnToggleSystem');
             if (toggleBtn) {
                 if (isBookingClosed) {
@@ -438,17 +411,6 @@
             if (isBookingClosed && !localStorage.getItem(MY_BOOKING_KEY)) {
                 document.getElementById('activeTimerLabel').innerText = "ระบบการจองถูกปิดโดยแอดมินแล้ว (สิ้นสุดการจอง)";
             }
-        }
-
-        function toggleBookingSystem() {
-            isBookingClosed = !isBookingClosed;
-            if (isBookingClosed) {
-                if (selectedSeatId) resetSelection(true);
-                alert("ปิดระบบการจองเรียบร้อยแล้ว นักเรียนจะไม่สามารถกดจองได้อีก");
-            } else {
-                alert("เปิดระบบการจองใหม่อีกครั้ง");
-            }
-            saveLocalSeats();
         }
 
         function renderSeats() {
@@ -477,13 +439,9 @@
                     if (seat.status === 'booked') {
                         btn.classList.add('seat-booked');
                         btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
-                    } else if (seat.status === 'selected') {
+                    } else if (selectedSeatId === seat.id) {
                         btn.classList.add('seat-selected');
-                        if (selectedSeatId && selectedSeatId !== seat.id) {
-                            btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">มีผู้เลือก</span>`;
-                        } else {
-                            btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
-                        }
+                        btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
                     } else {
                         btn.classList.add('seat-available');
                         btn.innerHTML = `<i class="fa-solid fa-chair mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ว่าง</span>`;
@@ -498,9 +456,7 @@
         }
 
         function selectSeat(seatId) {
-            loadLocalSeats();
-
-            if (checkMyExistingBooking()) {
+            if (localStorage.getItem(MY_BOOKING_KEY)) {
                 alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
                 return;
             }
@@ -515,72 +471,30 @@
                 return;
             }
 
-            const numberInput = document.getElementById('studentNumber').value.trim();
-            if (numberInput) {
-                let alreadyHasSeat = false;
-                Object.values(seatsData).forEach(s => {
-                    if ((s.status === 'booked' || s.status === 'selected') && s.studentNumber === numberInput && s.id !== seatId) {
-                        alreadyHasSeat = true;
-                    }
-                });
-                if (alreadyHasSeat) {
-                    alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-                    return;
-                }
-            }
-
-            if (selectedSeatId && seatsData[selectedSeatId] && seatsData[selectedSeatId].status === 'selected') {
-                seatsData[selectedSeatId].status = 'available';
-                seatsData[selectedSeatId].tempHoldUntil = null;
-            }
-
             selectedSeatId = seatId;
-            seatsData[seatId].status = 'selected';
-
             document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${seatId}`;
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = false;
             btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
 
-            saveLocalSeats();
-        }
-
-        function resetSelection(silent) {
-            if (checkMyExistingBooking()) return;
-            if (selectedSeatId && seatsData[selectedSeatId] && seatsData[selectedSeatId].status === 'selected') {
-                seatsData[selectedSeatId].status = 'available';
-                seatsData[selectedSeatId].tempHoldUntil = null;
-            }
-            selectedSeatId = null;
-            document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
-            
-            const btnSubmit = document.getElementById('btnSubmit');
-            btnSubmit.disabled = true;
-            btnSubmit.className = "px-6 py-2.5 bg-slate-800 text-slate-500 cursor-not-allowed font-semibold text-sm rounded-xl transition-all shadow-lg";
-
-            saveLocalSeats();
+            renderSeats();
         }
 
         function handleFormSubmit(e) {
             e.preventDefault();
-            loadLocalSeats();
 
-            if (checkMyExistingBooking()) {
+            if (localStorage.getItem(MY_BOOKING_KEY)) {
                 alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
                 return;
             }
+
             if (isBookingClosed) {
                 alert("ระบบการจองถูกปิดแล้ว ไม่สามารถส่งข้อมูลได้");
                 return;
             }
-            if (!selectedSeatId) return;
 
-            if (seatsData[selectedSeatId].status === 'booked') {
-                alert("ขออภัย! มีผู้อื่นกดจองโต๊ะนี้ตัดหน้าไปก่อนแล้ว");
-                resetSelection(false);
-                return;
-            }
+            if (!selectedSeatId) return;
 
             const name = document.getElementById('studentName').value.trim();
             const number = document.getElementById('studentNumber').value.trim();
@@ -590,35 +504,42 @@
                 return;
             }
 
-            let alreadyBooked = false;
-            Object.values(seatsData).forEach(s => {
-                if (s.status === 'booked' && s.studentNumber === number) {
-                    alreadyBooked = true;
+            // Realtime Atomic Check
+            db.ref('seats/' + selectedSeatId).transaction((seat) => {
+                if (seat && seat.status === 'available') {
+                    seat.status = 'booked';
+                    seat.studentName = name;
+                    seat.studentNumber = number;
+                    seat.timestamp = new Date().toLocaleString('th-TH');
+                    return seat;
+                } else {
+                    return; // Abort transaction if seat already taken
+                }
+            }, (error, committed) => {
+                if (committed) {
+                    localStorage.setItem(MY_BOOKING_KEY, number);
+                    alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
+                    selectedSeatId = null;
+                    lockUIForBookedUser(number);
+                } else {
+                    alert("ขออภัย! โต๊ะนี้ถูกผู้อื่นจองตัดหน้าไปก่อนแล้ว");
+                    selectedSeatId = null;
+                    renderSeats();
                 }
             });
+        }
 
-            if (alreadyBooked) {
-                localStorage.setItem(MY_BOOKING_KEY, number);
-                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-                lockUIForBookedUser(number);
-                resetSelection(false);
-                return;
-            }
+        // ADMIN CONTROLS
+        function adminTriggerStartTimer() {
+            const timerEnd = Date.now() + (10 * 60 * 1000);
+            db.ref('system_status/timerEnd').set(timerEnd);
+            alert("สั่งเริ่มนับเวลาถอยหลัง 10 นาทีสำเร็จ!");
+        }
 
-            seatsData[selectedSeatId].status = 'booked';
-            seatsData[selectedSeatId].studentName = name;
-            seatsData[selectedSeatId].studentNumber = number;
-            seatsData[selectedSeatId].timestamp = new Date().toLocaleString('th-TH');
-            seatsData[selectedSeatId].tempHoldUntil = null;
-
-            localStorage.setItem(MY_BOOKING_KEY, number);
-            saveLocalSeats();
-
-            alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-            
-            selectedSeatId = null;
-            lockUIForBookedUser(number);
-            document.getElementById('selectedSeatLabel').innerText = "จองสำเร็จแล้ว";
+        function toggleBookingSystem() {
+            isBookingClosed = !isBookingClosed;
+            db.ref('system_status/isClosed').set(isBookingClosed);
+            alert(isBookingClosed ? "ปิดระบบการจองสำเร็จ" : "เปิดระบบการจองสำเร็จ");
         }
 
         function switchTab(tab) {
@@ -684,28 +605,24 @@
 
         function cancelBooking(seatId) {
             if (confirm(`คุณต้องการยกเลิกการจองโต๊ะ ${seatId} ใช่หรือไม่?`)) {
-                seatsData[seatId].status = 'available';
-                seatsData[seatId].studentName = '';
-                seatsData[seatId].studentNumber = '';
-                seatsData[seatId].timestamp = null;
+                db.ref('seats/' + seatId).set({
+                    id: seatId,
+                    group: seatsData[seatId].group,
+                    number: seatsData[seatId].number,
+                    status: 'available',
+                    studentName: '',
+                    studentNumber: '',
+                    timestamp: null
+                });
                 localStorage.removeItem(MY_BOOKING_KEY);
-                saveLocalSeats();
-                location.reload();
             }
         }
 
         function clearAllBookings() {
             if (confirm("คุณแน่ใจหรือไม่ว่าต้องการล้างข้อมูลการจองโต๊ะทั้งหมด?")) {
-                Object.keys(seatsData).forEach(id => {
-                    seatsData[id].status = 'available';
-                    seatsData[id].studentName = '';
-                    seatsData[id].studentNumber = '';
-                    seatsData[id].timestamp = null;
-                });
+                db.ref('seats').set(generateInitialSeats());
+                db.ref('system_status').set({ isClosed: false, timerEnd: null });
                 localStorage.removeItem(MY_BOOKING_KEY);
-                localStorage.removeItem(GLOBAL_TIMER_KEY);
-                saveLocalSeats();
-                location.reload();
             }
         }
 
@@ -730,8 +647,7 @@
         }
 
         window.onload = function() {
-            initSeatsData();
-            setInterval(loadLocalSeats, 1500);
+            initRealtimeSync();
         };
     </script>
 </body>
