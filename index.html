@@ -114,6 +114,22 @@
         <!-- ================= USER VIEW ================= -->
         <div id="userTab" class="space-y-6">
             
+            <!-- Concert-style Prominent Timer Bar -->
+            <div class="bg-gradient-to-r from-amber-500/20 via-slate-900 to-amber-500/20 border border-amber-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 glow-box">
+                <div class="flex items-center space-x-3">
+                    <div class="p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400 text-xl animate-pulse">
+                        <i class="fa-solid fa-stopwatch"></i>
+                    </div>
+                    <div>
+                        <div class="text-xs text-amber-300 font-semibold tracking-wider uppercase">สถานะเวลาในการจองที่นั่ง</div>
+                        <div id="activeTimerLabel" class="text-sm text-slate-300 font-medium">กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง</div>
+                    </div>
+                </div>
+                <div class="bg-slate-950/80 border border-amber-500/40 px-6 py-2.5 rounded-xl text-center">
+                    <div id="timerDisplay" class="timer-display text-2xl font-extrabold text-amber-400">10:00</div>
+                </div>
+            </div>
+
             <!-- Classroom Layout Board -->
             <div class="bg-tech-card rounded-2xl p-4 md:p-6 glow-box">
                 
@@ -170,7 +186,7 @@
                 </div>
             </div>
 
-            <!-- Booking Form & Active Countdown -->
+            <!-- Booking Form & Confirmation -->
             <div class="bg-tech-card rounded-2xl p-6 glow-box">
                 <h2 class="text-lg font-bold text-white mb-4 flex items-center">
                     <i class="fa-solid fa-pen-to-square text-tech-cyan mr-2"></i> ฟอร์มลงทะเบียนจองที่นั่ง
@@ -194,15 +210,6 @@
                         <div>
                             <span class="text-xs text-slate-400 block">โต๊ะที่เลือกทำรายการ:</span>
                             <span id="selectedSeatLabel" class="text-lg font-bold text-amber-400">ยังไม่ได้เลือกโต๊ะ</span>
-                        </div>
-                        
-                        <!-- Timer Box -->
-                        <div id="timerContainer" class="hidden flex items-center space-x-3 bg-amber-500/10 border border-amber-500/30 px-4 py-2 rounded-xl">
-                            <i class="fa-solid fa-stopwatch text-amber-400 text-xl animate-pulse"></i>
-                            <div>
-                                <div class="text-[10px] text-amber-300 uppercase tracking-wider">เวลาที่เหลือในการจอง</div>
-                                <div id="timerDisplay" class="timer-display text-xl font-bold text-amber-400">10:00</div>
-                            </div>
                         </div>
 
                         <button type="submit" id="btnSubmit" disabled 
@@ -277,7 +284,7 @@
         let seatsData = {};
         let selectedSeatId = null;
         let globalTimerInterval = null;
-        const STORAGE_KEY = 'sci_math_seats_db_v6';
+        const STORAGE_KEY = 'sci_math_seats_db_v7';
 
         function initSeatsData() {
             const groups = ['Left', 'Center', 'Right'];
@@ -368,14 +375,19 @@
         }
 
         function selectSeat(seatId) {
-            // Check if this student already booked or selected a seat
-            const nameInput = document.getElementById('studentName').value.trim();
-            const numberInput = document.getElementById('studentNumber').value.trim();
+            loadLocalSeats(); // Pull latest state before selecting to prevent race conditions
 
-            if (nameInput && numberInput) {
+            // Check if seat is already taken by others
+            if (seatsData[seatId].status === 'booked') {
+                alert("ขออภัย! โต๊ะนี้ถูกผู้อื่นจองตัดหน้าไปแล้ว");
+                return;
+            }
+
+            const numberInput = document.getElementById('studentNumber').value.trim();
+            if (numberInput) {
                 let alreadyHasSeat = false;
                 Object.values(seatsData).forEach(s => {
-                    if ((s.status === 'booked' || s.status === 'selected') && s.studentNumber === numberInput) {
+                    if ((s.status === 'booked' || s.status === 'selected') && s.studentNumber === numberInput && s.id !== seatId) {
                         alreadyHasSeat = true;
                     }
                 });
@@ -396,6 +408,7 @@
             seatsData[seatId].tempHoldUntil = Date.now() + holdDuration;
 
             document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${seatId}`;
+            document.getElementById('activeTimerLabel').innerText = `กำลังทำรายการจอง: โต๊ะ ${seatId}`;
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = false;
@@ -406,7 +419,6 @@
         }
 
         function startGlobalTimer() {
-            document.getElementById('timerContainer').classList.remove('hidden');
             clearInterval(globalTimerInterval);
 
             globalTimerInterval = setInterval(() => {
@@ -433,12 +445,13 @@
         }
 
         function checkActiveTimerSync() {
+            loadLocalSeats();
             if (selectedSeatId && seatsData[selectedSeatId]) {
                 if (seatsData[selectedSeatId].status === 'selected' && seatsData[selectedSeatId].tempHoldUntil) {
                     const timeLeft = seatsData[selectedSeatId].tempHoldUntil - Date.now();
                     if (timeLeft > 0) {
-                        document.getElementById('timerContainer').classList.remove('hidden');
                         document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${selectedSeatId}`;
+                        document.getElementById('activeTimerLabel').innerText = `กำลังทำรายการจอง: โต๊ะ ${selectedSeatId}`;
                         const btnSubmit = document.getElementById('btnSubmit');
                         btnSubmit.disabled = false;
                         btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
@@ -459,7 +472,8 @@
             }
             selectedSeatId = null;
             clearInterval(globalTimerInterval);
-            document.getElementById('timerContainer').classList.add('hidden');
+            document.getElementById('activeTimerLabel').innerText = "กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง";
+            document.getElementById('timerDisplay').innerText = "10:00";
             document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
             
             const btnSubmit = document.getElementById('btnSubmit');
@@ -473,6 +487,13 @@
             e.preventDefault();
             if (!selectedSeatId) return;
 
+            loadLocalSeats();
+            if (seatsData[selectedSeatId].status === 'booked') {
+                alert("ขออภัย! มีผู้อื่นกดจองโต๊ะนี้ตัดหน้าไปก่อนแล้ว");
+                resetSelection(false);
+                return;
+            }
+
             const name = document.getElementById('studentName').value.trim();
             const number = document.getElementById('studentNumber').value.trim();
 
@@ -481,7 +502,6 @@
                 return;
             }
 
-            // Double check if student number already booked
             let alreadyBooked = false;
             Object.values(seatsData).forEach(s => {
                 if (s.status === 'booked' && s.studentNumber === number) {
@@ -501,20 +521,21 @@
             seatsData[selectedSeatId].timestamp = new Date().toLocaleString('th-TH');
             seatsData[selectedSeatId].tempHoldUntil = null;
 
-            alert(`ยืนยันการจอง โต๊ะ ${selectedSeatId} สำเร็จ!`);
+            saveLocalSeats();
+
+            alert(`ยินดีด้วย! ยืนยันการจอง โต๊ะ ${selectedSeatId} สำเร็จ`);
             
             document.getElementById('studentName').value = '';
             document.getElementById('studentNumber').value = '';
             selectedSeatId = null;
             clearInterval(globalTimerInterval);
-            document.getElementById('timerContainer').classList.add('hidden');
+            document.getElementById('activeTimerLabel').innerText = "การจองสำเร็จสิ้นสุดสมบูรณ์";
+            document.getElementById('timerDisplay').innerText = "00:00";
             document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = true;
             btnSubmit.className = "px-6 py-2.5 bg-slate-800 text-slate-500 cursor-not-allowed font-semibold text-sm rounded-xl transition-all shadow-lg";
-
-            saveLocalSeats();
         }
 
         function switchTab(tab) {
@@ -533,6 +554,7 @@
                 adminTab.classList.remove('hidden');
                 btnNavAdmin.className = "px-4 py-2 rounded-lg font-medium text-sm transition-all bg-tech-cyan text-slate-950 shadow-lg shadow-tech-cyan/20";
                 btnNavUser.className = "px-4 py-2 rounded-lg font-medium text-sm text-slate-400 hover:text-white transition-all";
+                renderAdminTable();
             }
         }
 
@@ -621,7 +643,7 @@
 
         window.onload = function() {
             initSeatsData();
-            setInterval(loadLocalSeats, 2000);
+            setInterval(loadLocalSeats, 1500); // Poll sync every 1.5 seconds for lightning-fast contest
         };
     </script>
 </body>
