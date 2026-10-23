@@ -125,8 +125,13 @@
                         <div id="activeTimerLabel" class="text-sm text-slate-300 font-medium">กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง</div>
                     </div>
                 </div>
-                <div class="bg-slate-950/80 border border-amber-500/40 px-6 py-2.5 rounded-xl text-center">
-                    <div id="timerDisplay" class="timer-display text-2xl font-extrabold text-amber-400">10:00</div>
+                <div class="flex items-center space-x-3">
+                    <button id="btnStartTimer" onclick="adminStartGlobalCountdown()" class="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl hover:bg-amber-400 text-xs shadow-lg transition-all hidden">
+                        <i class="fa-solid fa-play mr-1"></i> เริ่มนับเวลา
+                    </button>
+                    <div class="bg-slate-950/80 border border-amber-500/40 px-6 py-2.5 rounded-xl text-center">
+                        <div id="timerDisplay" class="timer-display text-2xl font-extrabold text-amber-400">10:00</div>
+                    </div>
                 </div>
             </div>
 
@@ -246,6 +251,9 @@
                         <p class="text-xs text-slate-400">จัดการระบบและควบคุมการจองที่นั่ง</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
+                        <button onclick="adminTriggerStartTimer()" class="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center shadow-md">
+                            <i class="fa-solid fa-play mr-1.5"></i> เริ่มนับเวลาถอยหลัง (10 นาที)
+                        </button>
                         <button id="btnToggleSystem" onclick="toggleBookingSystem()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all flex items-center">
                             <i class="fa-solid fa-lock mr-1.5"></i> ปิดระบบการจอง (ล็อกถาวร)
                         </button>
@@ -288,9 +296,10 @@
         let selectedSeatId = null;
         let globalTimerInterval = null;
         let isBookingClosed = false;
-        const STORAGE_KEY = 'sci_math_seats_db_v9';
-        const STATUS_KEY = 'sci_math_booking_closed_v9';
-        const MY_BOOKING_KEY = 'sci_math_my_booked_number_v9';
+        const STORAGE_KEY = 'sci_math_seats_db_v10';
+        const STATUS_KEY = 'sci_math_booking_closed_v10';
+        const MY_BOOKING_KEY = 'sci_math_my_booked_number_v10';
+        const GLOBAL_TIMER_KEY = 'sci_math_global_timer_end_v10';
 
         function initSeatsData() {
             const groups = ['Left', 'Center', 'Right'];
@@ -318,7 +327,6 @@
         function checkMyExistingBooking() {
             const myNum = localStorage.getItem(MY_BOOKING_KEY);
             if (myNum) {
-                // Check if this number is still booked in database
                 let found = false;
                 Object.values(seatsData).forEach(s => {
                     if (s.status === 'booked' && s.studentNumber === myNum) {
@@ -367,7 +375,7 @@
             renderSeats();
             renderAdminTable();
             updateSystemStateUI();
-            checkActiveTimerSync();
+            syncGlobalCountdownUI();
             checkMyExistingBooking();
         }
 
@@ -377,6 +385,36 @@
             renderSeats();
             renderAdminTable();
             updateSystemStateUI();
+        }
+
+        function adminTriggerStartTimer() {
+            const duration = 10 * 60 * 1000; // 10 minutes
+            const endTime = Date.now() + duration;
+            localStorage.setItem(GLOBAL_TIMER_KEY, endTime);
+            syncGlobalCountdownUI();
+            alert("เริ่มนับเวลาถอยหลัง 10 นาทีสำหรับทุกคนแล้ว!");
+        }
+
+        function syncGlobalCountdownUI() {
+            const endTime = localStorage.getItem(GLOBAL_TIMER_KEY);
+            if (!endTime) return;
+
+            const now = Date.now();
+            const timeLeft = parseInt(endTime) - now;
+
+            if (timeLeft <= 0) {
+                document.getElementById('timerDisplay').innerText = "00:00";
+                document.getElementById('activeTimerLabel').innerText = "หมดเวลาการจองที่นั่งแล้ว";
+            } else {
+                const totalSecs = Math.floor(timeLeft / 1000);
+                const mins = Math.floor(totalSecs / 60);
+                const secs = totalSecs % 60;
+                document.getElementById('timerDisplay').innerText = 
+                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                if (!localStorage.getItem(MY_BOOKING_KEY)) {
+                    document.getElementById('activeTimerLabel').innerText = "ระบบเปิดให้จองที่นั่งแล้ว กำลังนับเวลาถอยหลัง...";
+                }
+            }
         }
 
         function updateSystemStateUI() {
@@ -491,71 +529,15 @@
             }
 
             selectedSeatId = seatId;
-            const holdDuration = 10 * 60 * 1000;
             seatsData[seatId].status = 'selected';
-            seatsData[seatId].tempHoldUntil = Date.now() + holdDuration;
 
             document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${seatId}`;
-            document.getElementById('activeTimerLabel').innerText = `กำลังทำรายการจอง: โต๊ะ ${seatId}`;
             
             const btnSubmit = document.getElementById('btnSubmit');
             btnSubmit.disabled = false;
             btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
 
             saveLocalSeats();
-            startGlobalTimer();
-        }
-
-        function startGlobalTimer() {
-            clearInterval(globalTimerInterval);
-
-            globalTimerInterval = setInterval(() => {
-                if (!selectedSeatId || !seatsData[selectedSeatId] || seatsData[selectedSeatId].status !== 'selected') {
-                    clearInterval(globalTimerInterval);
-                    return;
-                }
-
-                const now = Date.now();
-                const timeLeft = seatsData[selectedSeatId].tempHoldUntil - now;
-
-                if (timeLeft <= 0 || isBookingClosed) {
-                    clearInterval(globalTimerInterval);
-                    if (!isBookingClosed) alert("หมดเวลาทำรายการ กรุณาเลือกโต๊ะใหม่อีกครั้ง");
-                    resetSelection(false);
-                } else {
-                    const totalSecs = Math.floor(timeLeft / 1000);
-                    const mins = Math.floor(totalSecs / 60);
-                    const secs = totalSecs % 60;
-                    document.getElementById('timerDisplay').innerText = 
-                        `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                }
-            }, 500);
-        }
-
-        function checkActiveTimerSync() {
-            loadLocalSeats();
-            if (localStorage.getItem(MY_BOOKING_KEY)) return;
-            if (isBookingClosed) {
-                resetSelection(true);
-                return;
-            }
-            if (selectedSeatId && seatsData[selectedSeatId]) {
-                if (seatsData[selectedSeatId].status === 'selected' && seatsData[selectedSeatId].tempHoldUntil) {
-                    const timeLeft = seatsData[selectedSeatId].tempHoldUntil - Date.now();
-                    if (timeLeft > 0) {
-                        document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${selectedSeatId}`;
-                        document.getElementById('activeTimerLabel').innerText = `กำลังทำรายการจอง: โต๊ะ ${selectedSeatId}`;
-                        const btnSubmit = document.getElementById('btnSubmit');
-                        btnSubmit.disabled = false;
-                        btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
-                        if (!globalTimerInterval) startGlobalTimer();
-                        return;
-                    }
-                }
-            }
-            if (selectedSeatId && (!seatsData[selectedSeatId] || seatsData[selectedSeatId].status !== 'selected')) {
-                resetSelection(true);
-            }
         }
 
         function resetSelection(silent) {
@@ -565,9 +547,6 @@
                 seatsData[selectedSeatId].tempHoldUntil = null;
             }
             selectedSeatId = null;
-            clearInterval(globalTimerInterval);
-            document.getElementById('activeTimerLabel').innerText = isBookingClosed ? "ระบบการจองถูกปิดโดยแอดมินแล้ว (สิ้นสุดการจอง)" : "กรุณาเลือกโต๊ะที่ต้องการในผังด้านล่าง";
-            document.getElementById('timerDisplay').innerText = "10:00";
             document.getElementById('selectedSeatLabel').innerText = "ยังไม่ได้เลือกโต๊ะ";
             
             const btnSubmit = document.getElementById('btnSubmit');
@@ -631,7 +610,6 @@
             document.getElementById('studentName').value = '';
             document.getElementById('studentNumber').value = '';
             selectedSeatId = null;
-            clearInterval(globalTimerInterval);
             
             lockUIForBookedUser(number);
             document.getElementById('selectedSeatLabel').innerText = "จองสำเร็จแล้ว";
@@ -710,7 +688,7 @@
                 seatsData[seatId].timestamp = null;
                 localStorage.removeItem(MY_BOOKING_KEY);
                 saveLocalSeats();
-                location.reload(); // Refresh to restore UI state
+                location.reload();
             }
         }
 
