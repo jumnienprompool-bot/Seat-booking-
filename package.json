@@ -1,0 +1,15 @@
+{
+  "name": "seatflow-v2",
+  "version": "2.0.0",
+  "description": "ระบบจองที่นั่งห้องเรียน วิท-คณิต (มีเวลาจอง จองครั้งเดียวต่อคน)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
