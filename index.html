@@ -1,675 +1,1010 @@
+{
+  "name": "seatflow-v2",
+  "version": "2.0.0",
+  "description": "ระบบจองที่นั่งห้องเรียน วิท-คณิต (มีเวลาจอง จองครั้งเดียวต่อคน)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+// ============================================================
+// SeatFlow V2 - ระบบจองที่นั่งห้องเรียน (วิท-คณิต)
+// Full-stack Node.js + Express, เก็บข้อมูลใน data.json
+// ============================================================
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const app = express();
+const PORT = process.env.PORT || 3000;
+const DATA_FILE = path.join(__dirname, 'data.json');
+
+// ---------- ค่าคงที่ระบบ ----------
+const COUNTDOWN_SECONDS = 5;    // นับถอยหลังก่อนเปิดจอง 5 วินาที
+const OPEN_SECONDS = 10 * 60;   // เปิดจองได้ 10 นาที (600 วินาที)
+const ADMIN_CODE = 'zxcvbnm';   // รหัสแอดมิน
+
+// ---------- จัดการเก็บข้อมูล ----------
+let db = {
+  seats: [],        // {id, label, x, y}
+  bookings: [],     // {seatId, label, nickname, deviceId, bookedAt}
+  session: { phase: 'idle', startedAt: null } // phase: idle | closed
+};
+
+function loadDB() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      db = Object.assign(db, JSON.parse(raw));
+    }
+  } catch (e) { console.error('loadDB error:', e.message); }
+}
+function saveDB() {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2)); }
+  catch (e) { console.error('saveDB error:', e.message); }
+}
+loadDB();
+
+// ---------- คำนวณสถานะเซสชัน (derived จากเวลา server) ----------
+function getSessionState() {
+  const now = Date.now();
+  if (db.session.phase === 'closed') {
+    return { phase: 'closed', countdownRemaining: 0, openRemaining: 0, openTotal: OPEN_SECONDS };
+  }
+  if (!db.session.startedAt) {
+    return { phase: 'idle', countdownRemaining: COUNTDOWN_SECONDS, openRemaining: OPEN_SECONDS, openTotal: OPEN_SECONDS };
+  }
+  const elapsed = (now - db.session.startedAt) / 1000;
+  if (elapsed < COUNTDOWN_SECONDS) {
+    return { phase: 'countdown', countdownRemaining: Math.ceil(COUNTDOWN_SECONDS - elapsed), openRemaining: OPEN_SECONDS, openTotal: OPEN_SECONDS };
+  }
+  if (elapsed < COUNTDOWN_SECONDS + OPEN_SECONDS) {
+    return { phase: 'open', countdownRemaining: 0, openRemaining: Math.ceil(COUNTDOWN_SECONDS + OPEN_SECONDS - elapsed), openTotal: OPEN_SECONDS };
+  }
+  if (db.session.phase !== 'closed') { db.session.phase = 'closed'; saveDB(); }
+  return { phase: 'closed', countdownRemaining: 0, openRemaining: 0, openTotal: OPEN_SECONDS };
+}
+
+// ---------- Admin token ----------
+const adminTokens = new Set();
+function makeToken() { return crypto.randomBytes(24).toString('hex'); }
+function checkToken(req) {
+  const t = req.query.token || (req.body && req.body.token);
+  return t && adminTokens.has(t);
+}
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================================
+// API สาธารณะ
+// ============================================================
+app.get('/api/state', (req, res) => {
+  const ss = getSessionState();
+  const deviceId = (req.query.deviceId || '').toString().trim();
+  const myBooking = db.bookings.find(b => b.deviceId === deviceId) || null;
+  const seats = db.seats.map(s => {
+    const booked = db.bookings.find(b => b.seatId === s.id);
+    return { id: s.id, label: s.label, x: s.x, y: s.y, status: booked ? 'booked' : 'available' };
+  });
+  res.json({
+    phase: ss.phase, countdownRemaining: ss.countdownRemaining,
+    openRemaining: ss.openRemaining, openTotal: ss.openTotal, seats,
+    stats: { total: seats.length, booked: db.bookings.length, available: seats.length - db.bookings.length },
+    alreadyBooked: !!myBooking,
+    mySeat: myBooking ? { label: myBooking.label, nickname: myBooking.nickname } : null
+  });
+});
+
+app.post('/api/book', (req, res) => {
+  const ss = getSessionState();
+  if (ss.phase !== 'open') {
+    return res.json({ ok: false, reason: ss.phase === 'countdown' ? 'not_open_yet' : 'closed', message: 'ระบบยังไม่เปิดหรือปิดไปแล้ว' });
+  }
+  let { seatId, nickname, deviceId } = req.body || {};
+  seatId = (seatId || '').toString().trim();
+  nickname = (nickname || '').toString().trim();
+  deviceId = (deviceId || '').toString().trim();
+  if (!seatId || !nickname || !deviceId) return res.json({ ok: false, reason: 'invalid', message: 'ข้อมูลไม่ครบถ้วน' });
+  const normName = nickname.toLowerCase();
+  const byName = db.bookings.find(b => b.nickname.toLowerCase() === normName);
+  const byDevice = db.bookings.find(b => b.deviceId === deviceId);
+  if (byName || byDevice) {
+    const bk = byName || byDevice;
+    return res.json({ ok: false, reason: 'already_booked', message: 'คุณจองแล้ว และคุณไม่มีโอกาสเป็นครั้งที่สองแล้ว', seat: bk.label });
+  }
+  const seat = db.seats.find(s => s.id === seatId);
+  if (!seat) return res.json({ ok: false, reason: 'invalid', message: 'ไม่มีที่นั่งนี้' });
+  if (db.bookings.find(b => b.seatId === seatId)) return res.json({ ok: false, reason: 'seat_taken', message: 'ที่นั่งนี้ถูกจองไปแล้ว' });
+  const booking = { seatId, label: seat.label, nickname, deviceId, bookedAt: Date.now() };
+  db.bookings.push(booking); saveDB();
+  res.json({ ok: true, booking });
+});
+
+// ============================================================
+// API แอดมิน
+// ============================================================
+app.post('/api/admin/login', (req, res) => {
+  const code = ((req.body && req.body.code) || '').toString();
+  if (code === ADMIN_CODE) {
+    const token = makeToken(); adminTokens.add(token);
+    return res.json({ ok: true, token });
+  }
+  res.json({ ok: false, message: 'รหัสไม่ถูกต้อง' });
+});
+
+function adminGuard(req, res) {
+  if (!checkToken(req)) { res.json({ ok: false, reason: 'unauthorized', message: 'กรุณาเข้าสู่ระบบแอดมินใหม่' }); return false; }
+  return true;
+}
+
+app.get('/api/admin/data', (req, res) => {
+  if (!adminGuard(req, res)) return;
+  const ss = getSessionState();
+  const seats = db.seats.map(s => {
+    const b = db.bookings.find(bk => bk.seatId === s.id);
+    return { id: s.id, label: s.label, x: s.x, y: s.y, status: b ? 'booked' : 'available', bookedBy: b ? b.nickname : null, bookedAt: b ? b.bookedAt : null };
+  });
+  res.json({
+    ok: true, phase: ss.phase, countdownRemaining: ss.countdownRemaining,
+    openRemaining: ss.openRemaining, openTotal: ss.openTotal, seats,
+    bookings: db.bookings.slice().sort((a, b) => a.bookedAt - b.bookedAt),
+    stats: { total: seats.length, booked: db.bookings.length, available: seats.length - db.bookings.length }
+  });
+});
+
+app.post('/api/admin/save-seats', (req, res) => {
+  if (!adminGuard(req, res)) return;
+  const seats = (req.body && req.body.seats) || [];
+  const keptIds = new Set(seats.map(s => s.id));
+  db.bookings = db.bookings.filter(b => keptIds.has(b.seatId));
+  db.seats = seats.map(s => ({ id: s.id, label: String(s.label), x: Number(s.x) || 0, y: Number(s.y) || 0 }));
+  saveDB();
+  res.json({ ok: true, count: db.seats.length });
+});
+
+app.post('/api/admin/start', (req, res) => {
+  if (!adminGuard(req, res)) return;
+  db.session = { phase: 'idle', startedAt: Date.now() };
+  saveDB();
+  res.json({ ok: true, message: 'เริ่มระบบจองแล้ว' });
+});
+
+app.post('/api/admin/reset', (req, res) => {
+  if (!adminGuard(req, res)) return;
+  db.bookings = [];
+  db.session = { phase: 'idle', startedAt: null };
+  saveDB();
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/close', (req, res) => {
+  if (!adminGuard(req, res)) return;
+  db.session = { phase: 'closed', startedAt: db.session.startedAt };
+  saveDB();
+  res.json({ ok: true });
+});
+
+app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
+
+app.listen(PORT, () => {
+  console.log(`SeatFlow V2 รันที่ http://localhost:${PORT}`);
+  console.log(`เปิดจอง: นับถอยหลัง ${COUNTDOWN_SECONDS} วิ + จองได้ ${OPEN_SECONDS / 60} นาที`);
+});
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบจองที่นั่งห้องเรียนวิทย์-คณิต (SeatUp Sci-Math Edition)</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts: Kanit & Orbitron -->
-    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        tech: {
-                            dark: '#060a12',
-                            card: 'rgba(15, 23, 42, 0.85)',
-                            border: 'rgba(56, 189, 248, 0.25)',
-                            cyan: '#00f0ff',
-                            blueDark: '#0284c7',
-                            accent: '#38bdf8'
-                        }
-                    },
-                    fontFamily: {
-                        kanit: ['Kanit', 'sans-serif'],
-                        orbitron: ['Orbitron', 'sans-serif']
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        body {
-            font-family: 'Kanit', sans-serif;
-            background: #060a12;
-            background-image: 
-                radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.12), transparent 50%),
-                radial-gradient(circle at 80% 80%, rgba(56, 189, 248, 0.08), transparent 40%);
-            background-attachment: fixed;
-            color: #f1f5f9;
-        }
-        .glow-box {
-            box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-        }
-        .seat-btn {
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .seat-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
-        }
-        .seat-available {
-            background: rgba(16, 185, 129, 0.12);
-            border: 1.5px solid #10b981;
-            color: #34d399;
-        }
-        .seat-selected {
-            background: rgba(245, 158, 11, 0.2);
-            border: 2px solid #f59e0b;
-            color: #fbbf24;
-            animation: pulse-border 1.5s infinite;
-        }
-        .seat-booked {
-            background: rgba(239, 68, 68, 0.12);
-            border: 1.5px solid #ef4444;
-            color: #f87171;
-            cursor: not-allowed;
-        }
-        @keyframes pulse-border {
-            0%, 100% { box-shadow: 0 0 5px rgba(245, 158, 11, 0.4); }
-            50% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.8); }
-        }
-        .timer-display {
-            font-family: 'Orbitron', monospace;
-            text-shadow: 0 0 10px rgba(0, 240, 255, 0.7);
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>จองที่นั่งห้องเรียน | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="min-h-screen pb-12">
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">S</div>
+      <div>
+        <h1>ระบบจองที่นั่งห้องเรียน</h1>
+        <p>ห้องเรียนวิทยาศาสตร์-คณิตศาสตร์ · SeatFlow V2</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a href="/summary.html" class="btn btn-ghost">สรุป</a>
+      <a href="/admin-login.html" class="btn btn-ghost">แอดมิน</a>
+    </div>
+  </div>
 
-    <!-- Header -->
-    <header class="bg-slate-900/80 backdrop-blur-md border-b border-tech-border sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap justify-between items-center gap-4">
-            <div class="flex items-center space-x-3">
-                <div class="p-2.5 bg-tech-cyan/10 border border-tech-cyan/30 rounded-xl text-tech-cyan">
-                    <i class="fa-solid font-bold fa-microscope text-2xl"></i>
-                </div>
-                <div>
-                    <h1 class="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-tech-cyan via-sky-300 to-blue-400">
-                        SeatUp (Sci-Math Classroom)
-                    </h1>
-                    <p class="text-xs text-slate-400">ระบบจัดการและจองที่นั่งห้องเรียนเรียลไทม์</p>
-                </div>
-            </div>
+  <div id="statusBanner" class="status-banner idle">
+    <div id="statusText">ระบบยังไม่เปิดให้จอง กรุณารอแอดมินเริ่มการจอง</div>
+    <div id="bigTimer" class="big-timer hidden">--:--</div>
+    <div class="timer-bar"><div id="timerFill" style="width:0%"></div></div>
+  </div>
 
-            <!-- Navigation Buttons -->
-            <div class="flex items-center space-x-2 bg-slate-950/60 p-1.5 rounded-xl border border-tech-border">
-                <button id="btnNavUser" onclick="switchTab('user')" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-tech-cyan text-slate-950 shadow-lg shadow-tech-cyan/20">
-                    <i class="fa-solid fa-chair mr-1.5"></i> หน้าจองที่นั่ง
-                </button>
-                <button id="btnNavAdmin" onclick="switchTab('admin')" class="px-4 py-2 rounded-lg font-medium text-sm text-slate-400 hover:text-white transition-all">
-                    <i class="fa-solid fa-user-shield mr-1.5"></i> ระบบแอดมิน
-                </button>
-            </div>
+  <div class="grid-main">
+    <div class="panel">
+      <h2>ผังที่นั่งห้องเรียน</h2>
+      <p class="sub">กดที่นั่งที่ต้องการ (สีฟ้า = ว่าง · สีแดง = จองแล้ว · สีเหลือง = ที่คุณเลือก)</p>
+      <div class="seat-stage" id="seatStage">
+        <div class="board">กระดานครู / BOARD</div>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+        <span><span class="dot" style="background:linear-gradient(145deg,#fde047,#eab308)"></span>ที่คุณเลือก</span>
+        <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>สถานะที่นั่ง</h2>
+        <div class="stat-cards" style="margin-top:12px">
+          <div class="stat avail"><div class="num" id="statAvail">0</div><div class="lbl">ที่ว่าง</div></div>
+          <div class="stat booked"><div class="num" id="statBooked">0</div><div class="lbl">จองแล้ว</div></div>
         </div>
-    </header>
+      </div>
 
-    <main class="max-w-7xl mx-auto px-4 mt-6">
+      <div class="panel my-booking hidden" id="myBookingBox">
+        <h2 style="color:#86efac">คุณจองที่นั่งแล้ว</h2>
+        <div class="seat-big" id="mySeatLabel">-</div>
+        <p style="font-size:13px;color:var(--text-dim);margin-top:6px">คุณไม่มีโอกาสจองเป็นครั้งที่สอง</p>
+      </div>
 
-        <!-- ================= USER VIEW ================= -->
-        <div id="userTab" class="space-y-6">
-            
-            <!-- Timer Bar -->
-            <div class="bg-gradient-to-r from-amber-500/20 via-slate-900 to-amber-500/20 border border-amber-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 glow-box">
-                <div class="flex items-center space-x-3">
-                    <div class="p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400 text-xl animate-pulse">
-                        <i class="fa-solid fa-stopwatch"></i>
-                    </div>
-                    <div>
-                        <div class="text-xs text-amber-300 font-semibold tracking-wider uppercase">สถานะเวลาในการจองที่นั่ง</div>
-                        <div id="activeTimerLabel" class="text-sm text-slate-300 font-medium">รอแอดมินกดเริ่มนับเวลา...</div>
-                    </div>
-                </div>
-                <div class="bg-slate-950/80 border border-amber-500/40 px-6 py-2.5 rounded-xl text-center">
-                    <div id="timerDisplay" class="timer-display text-2xl font-extrabold text-amber-400">10:00</div>
-                </div>
-            </div>
+      <div class="panel selected-box" id="bookBox">
+        <h2>ที่นั่งที่เลือก</h2>
+        <div id="selectedSeatDisplay" style="color:var(--text-dim);font-size:13px;margin:8px 0">ยังไม่ได้เลือกที่นั่ง</div>
+        <input class="input" id="nicknameInput" type="text" placeholder="ใส่ชื่อเล่นของคุณ" maxlength="20">
+        <button class="btn btn-primary" id="confirmBtn" style="width:100%;justify-content:center" disabled>ยืนยันการจอง</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-            <!-- Classroom Layout Board -->
-            <div class="bg-tech-card rounded-2xl p-4 md:p-6 glow-box">
-                
-                <!-- Front Board -->
-                <div class="mb-6 text-center">
-                    <div class="max-w-md mx-auto py-3 bg-gradient-to-r from-cyan-950/80 via-slate-900 to-cyan-950/80 border border-tech-cyan/40 rounded-xl text-tech-cyan font-semibold text-sm tracking-widest shadow-inner">
-                        <i class="fa-solid fa-chalkboard text-base mr-2"></i> กระดานดำหน้าห้องเรียน / SMART BOARD
-                    </div>
-                </div>
+<div class="modal-overlay" id="modalAlready">
+  <div class="modal danger">
+    <div class="icon">⛔</div>
+    <h3>คุณจองแล้ว</h3>
+    <p>คุณได้จองที่นั่งไปแล้ว และคุณไม่มีโอกาสเป็นครั้งที่สองแล้ว<br>ที่นั่งของคุณ: <b id="alreadySeat" style="color:#fca5a5">-</b></p>
+    <button class="btn btn-primary" onclick="closeModal('modalAlready')">เข้าใจแล้ว</button>
+  </div>
+</div>
 
-                <!-- Seat Status Legend -->
-                <div class="flex flex-wrap justify-center items-center gap-6 mb-6 text-xs md:text-sm bg-slate-950/40 py-2.5 px-4 rounded-xl border border-slate-800 w-fit mx-auto">
-                    <div class="flex items-center space-x-2">
-                        <span class="w-3.5 h-3.5 rounded-full bg-emerald-500/20 border border-emerald-400 inline-block"></span>
-                        <span class="text-slate-300">ว่าง</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <span class="w-3.5 h-3.5 rounded-full bg-amber-500/30 border border-amber-400 inline-block"></span>
-                        <span class="text-slate-300">กำลังเลือก</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <span class="w-3.5 h-3.5 rounded-full bg-rose-500/20 border border-rose-400 inline-block"></span>
-                        <span class="text-slate-300">จองแล้ว</span>
-                    </div>
-                </div>
+<div class="modal-overlay" id="modalSuccess">
+  <div class="modal success">
+    <div class="icon">✅</div>
+    <h3>จองที่นั่งสำเร็จ</h3>
+    <p>ที่นั่ง <b id="successSeat" style="color:#86efac;font-size:20px">-</b><br>ชื่อ: <b id="successName">-</b></p>
+    <button class="btn btn-success" onclick="closeModal('modalSuccess')">ตกลง</button>
+  </div>
+</div>
 
-                <!-- 3 Main Sections -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
-                        <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
-                            แถวที่ 1 (ฝั่งซ้าย)
-                        </div>
-                        <div id="groupLeft" class="grid grid-cols-3 gap-2"></div>
-                    </div>
+<div class="modal-overlay" id="modalTaken">
+  <div class="modal danger">
+    <div class="icon">❌</div>
+    <h3>ที่นั่งนี้ถูกจองไปแล้ว</h3>
+    <p>กรุณาเลือกที่นั่งอื่นที่ยังว่าง (สีฟ้า)</p>
+    <button class="btn btn-primary" onclick="closeModal('modalTaken')">ตกลง</button>
+  </div>
+</div>
 
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
-                        <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
-                            แถวที่ 2 (ตรงกลาง)
-                        </div>
-                        <div id="groupCenter" class="grid grid-cols-3 gap-2"></div>
-                    </div>
+<div class="modal-overlay" id="modalClosed">
+  <div class="modal danger">
+    <div class="icon">🔒</div>
+    <h3>ระบบปิดแล้ว</h3>
+    <p>เวลาจองหมด ระบบปิดโดยสมบูรณ์ ไม่มีเงื่อนไขใดๆ</p>
+    <button class="btn btn-primary" onclick="closeModal('modalClosed')">ตกลง</button>
+  </div>
+</div>
 
-                    <div class="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
-                        <div class="text-center text-xs font-bold text-tech-cyan mb-3 pb-2 border-b border-slate-800 uppercase tracking-wider">
-                            แถวที่ 3 (ฝั่งขวา)
-                        </div>
-                        <div id="groupRight" class="grid grid-cols-3 gap-2"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Booking Form -->
-            <div class="bg-tech-card rounded-2xl p-6 glow-box">
-                <h2 class="text-lg font-bold text-white mb-4 flex items-center">
-                    <i class="fa-solid fa-pen-to-square text-tech-cyan mr-2"></i> ฟอร์มลงทะเบียนจองที่นั่ง
-                </h2>
-
-                <form id="bookingForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-medium text-slate-300 mb-1.5">ชื่อ-นามสกุล นักเรียน <span class="text-rose-400">*</span></label>
-                            <input type="text" id="studentName" required placeholder="เช่น นายสมชาย ใจดี" 
-                                class="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-tech-cyan focus:ring-1 focus:ring-tech-cyan transition-all">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-slate-300 mb-1.5">เลขที่ <span class="text-rose-400">*</span></label>
-                            <input type="number" id="studentNumber" required min="1" max="50" placeholder="เช่น 15" 
-                                class="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-tech-cyan focus:ring-1 focus:ring-tech-cyan transition-all">
-                        </div>
-                    </div>
-
-                    <div class="flex flex-wrap items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-slate-800 gap-4">
-                        <div>
-                            <span class="text-xs text-slate-400 block">โต๊ะที่เลือกทำรายการ:</span>
-                            <span id="selectedSeatLabel" class="text-lg font-bold text-amber-400">ยังไม่ได้เลือกโต๊ะ</span>
-                        </div>
-
-                        <button type="submit" id="btnSubmit" disabled 
-                            class="px-6 py-2.5 bg-slate-800 text-slate-500 cursor-not-allowed font-semibold text-sm rounded-xl transition-all shadow-lg">
-                            ยืนยันการจองที่นั่ง
-                        </button>
-                    </div>
-                </form>
-            </div>
-
-        </div>
-
-        <!-- ================= ADMIN VIEW ================= -->
-        <div id="adminTab" class="hidden space-y-6">
-            <div id="adminAuthBox" class="max-w-md mx-auto bg-tech-card rounded-2xl p-6 glow-box text-center space-y-4">
-                <div class="w-12 h-12 bg-tech-cyan/10 border border-tech-cyan/30 rounded-full flex items-center justify-center mx-auto text-tech-cyan text-xl">
-                    <i class="fa-solid fa-lock"></i>
-                </div>
-                <h2 class="text-lg font-bold text-white">เข้าสู่ระบบการจัดการ (Admin)</h2>
-                <input type="password" id="adminPassword" placeholder="กรอกรหัสผ่านแอดมิน" 
-                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-center focus:outline-none focus:border-tech-cyan">
-                <button onclick="loginAdmin()" class="w-full py-2.5 bg-tech-cyan text-slate-950 font-bold rounded-xl hover:bg-sky-300 transition-all">
-                    เข้าสู่ระบบ
-                </button>
-            </div>
-
-            <div id="adminContent" class="hidden space-y-6">
-                <div class="flex flex-wrap justify-between items-center bg-tech-card p-4 rounded-2xl border border-tech-border gap-4">
-                    <div>
-                        <h2 class="text-lg font-bold text-white">แดชบอร์ดแอดมิน (Admin Dashboard)</h2>
-                        <p class="text-xs text-slate-400">จัดการระบบและควบคุมการจองที่นั่ง</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <button onclick="adminTriggerStartTimer()" class="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center shadow-md">
-                            <i class="fa-solid fa-play mr-1.5"></i> เริ่มนับเวลา (เปิดให้จอง)
-                        </button>
-                        <button id="btnToggleSystem" onclick="toggleBookingSystem()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all flex items-center">
-                            <i class="fa-solid fa-lock mr-1.5"></i> ปิดระบบการจอง (ล็อกถาวร)
-                        </button>
-                        <button onclick="exportToCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-all flex items-center">
-                            <i class="fa-solid fa-file-excel mr-1.5"></i> ส่งออกเป็น CSV
-                        </button>
-                        <button onclick="clearAllBookings()" class="px-4 py-2 bg-slate-700 hover:bg-rose-600 text-white font-medium text-xs rounded-xl transition-all flex items-center">
-                            <i class="fa-solid fa-trash-can mr-1.5"></i> รีเซ็ตเวลาและข้อมูลทั้งหมด
-                        </button>
-                    </div>
-                </div>
-
-                <div class="bg-tech-card rounded-2xl border border-tech-border overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm text-slate-300">
-                            <thead class="bg-slate-950 text-xs uppercase text-slate-400 border-b border-slate-800">
-                                <tr>
-                                    <th class="px-4 py-3">รหัสโต๊ะ</th>
-                                    <th class="px-4 py-3">ชื่อ-นามสกุล</th>
-                                    <th class="px-4 py-3">เลขที่</th>
-                                    <th class="px-4 py-3">เวลาที่จอง</th>
-                                    <th class="px-4 py-3 text-center">จัดการ</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminTableBody" class="divide-y divide-slate-800/60">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-    </main>
-
-    <!-- Firebase Realtime SDK -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
-    <script>
-        const firebaseConfig = {
-            databaseURL: "https://sci-math-seatup-default-rtdb.asia-southeast1.firebasedatabase.app"
-        };
-        
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-
-        let seatsData = {};
-        let selectedSeatId = null;
-        let isBookingClosed = false;
-        let globalTimerActive = false;
-        let countdownInterval = null;
-        const MY_BOOKING_KEY = 'sci_math_my_booked_num_v16';
-
-        function initRealtimeSync() {
-            db.ref('seats').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (!data) {
-                    const initial = generateInitialSeats();
-                    db.ref('seats').set(initial);
-                    seatsData = initial;
-                } else {
-                    seatsData = data;
-                }
-                renderSeats();
-                renderAdminTable();
-            });
-
-            db.ref('system_status').on('value', (snapshot) => {
-                const status = snapshot.val() || {};
-                isBookingClosed = status.isClosed || false;
-                globalTimerActive = status.isActive || false;
-                const timerEnd = status.timerEnd || null;
-
-                updateSystemUI();
-                startCountdownLoop(timerEnd);
-                renderSeats();
-            });
-
-            checkMyLocalBookingStatus();
-        }
-
-        function generateInitialSeats() {
-            const initial = {};
-            const groups = ['Left', 'Center', 'Right'];
-            groups.forEach(groupKey => {
-                for (let i = 1; i <= 12; i++) {
-                    const seatId = `${groupKey.charAt(0)}${i}`;
-                    initial[seatId] = {
-                        id: seatId,
-                        group: groupKey,
-                        number: i,
-                        status: 'available',
-                        studentName: '',
-                        studentNumber: '',
-                        timestamp: null
-                    };
-                }
-            });
-            return initial;
-        }
-
-        function checkMyLocalBookingStatus() {
-            const myNum = localStorage.getItem(MY_BOOKING_KEY);
-            if (myNum) {
-                let found = false;
-                Object.values(seatsData).forEach(s => {
-                    if (s.status === 'booked' && s.studentNumber === myNum) {
-                        found = true;
-                    }
-                });
-                if (found) {
-                    lockUIForBookedUser(myNum);
-                } else {
-                    localStorage.removeItem(MY_BOOKING_KEY);
-                }
-            }
-        }
-
-        function lockUIForBookedUser(myNum) {
-            document.getElementById('activeTimerLabel').innerText = "คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว";
-            document.getElementById('timerDisplay').innerText = "DONE";
-            const nameInput = document.getElementById('studentName');
-            const numInput = document.getElementById('studentNumber');
-            if (nameInput) { nameInput.value = ""; nameInput.disabled = true; }
-            if (numInput) { numInput.value = myNum; numInput.disabled = true; }
-            const btnSubmit = document.getElementById('btnSubmit');
-            if (btnSubmit) {
-                btnSubmit.disabled = true;
-                btnSubmit.className = "px-6 py-2.5 bg-slate-800 text-slate-500 cursor-not-allowed font-semibold text-sm rounded-xl transition-all shadow-lg";
-            }
-        }
-
-        function startCountdownLoop(timerEnd) {
-            clearInterval(countdownInterval);
-            
-            if (!globalTimerActive || !timerEnd) {
-                document.getElementById('timerDisplay').innerText = "10:00";
-                if (!localStorage.getItem(MY_BOOKING_KEY)) {
-                    document.getElementById('activeTimerLabel').innerText = "รอแอดมินกดเริ่มนับเวลา (ระบบยังถูกล็อกอยู่)";
-                }
-                return;
-            }
-
-            countdownInterval = setInterval(() => {
-                const timeLeft = timerEnd - Date.now();
-                if (timeLeft <= 0) {
-                    document.getElementById('timerDisplay').innerText = "00:00";
-                    if (!localStorage.getItem(MY_BOOKING_KEY)) {
-                        document.getElementById('activeTimerLabel').innerText = "หมดเวลาการจองที่นั่งแล้ว";
-                    }
-                } else {
-                    const totalSecs = Math.floor(timeLeft / 1000);
-                    const mins = Math.floor(totalSecs / 60);
-                    const secs = totalSecs % 60;
-                    document.getElementById('timerDisplay').innerText = 
-                        `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                    if (!localStorage.getItem(MY_BOOKING_KEY)) {
-                        document.getElementById('activeTimerLabel').innerText = "ระบบเปิดให้จองแล้ว กำลังนับเวลาถอยหลัง!";
-                    }
-                }
-            }, 500);
-        }
-
-        function updateSystemUI() {
-            const toggleBtn = document.getElementById('btnToggleSystem');
-            if (toggleBtn) {
-                if (isBookingClosed) {
-                    toggleBtn.className = "px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-all flex items-center";
-                    toggleBtn.innerHTML = `<i class="fa-solid fa-lock-open mr-1.5"></i> เปิดระบบการจอง`;
-                } else {
-                    toggleBtn.className = "px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all flex items-center";
-                    toggleBtn.innerHTML = `<i class="fa-solid fa-lock mr-1.5"></i> ปิดระบบการจอง (ล็อกถาวร)`;
-                }
-            }
-
-            if (isBookingClosed && !localStorage.getItem(MY_BOOKING_KEY)) {
-                document.getElementById('activeTimerLabel').innerText = "ระบบการจองถูกปิดโดยแอดมินแล้ว (สิ้นสุดการจอง)";
-            }
-        }
-
-        function renderSeats() {
-            const containers = {
-                'Left': document.getElementById('groupLeft'),
-                'Center': document.getElementById('groupCenter'),
-                'Right': document.getElementById('groupRight')
-            };
-
-            Object.keys(containers).forEach(key => { if(containers[key]) containers[key].innerHTML = ''; });
-
-            Object.values(seatsData).forEach(seat => {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = `seat-btn p-2.5 rounded-xl flex flex-col items-center justify-center font-bold text-xs transition-all w-full `;
-                
-                if (isBookingClosed) {
-                    if (seat.status === 'booked') {
-                        btn.className += ' seat-booked';
-                        btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
-                    } else {
-                        btn.className += ' bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed opacity-60';
-                        btn.innerHTML = `<i class="fa-solid fa-ban mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ปิดจอง</span>`;
-                    }
-                } else if (!globalTimerActive) {
-                    // ล็อกโต๊ะทั้งหมดเพราะแอดมินยังไม่กดเริ่ม
-                    btn.className += ' bg-slate-900 border border-slate-800 text-slate-400 cursor-not-allowed opacity-75';
-                    btn.innerHTML = `<i class="fa-solid fa-lock mb-1 text-amber-400"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal text-amber-300">รอแอดมินกดเริ่ม</span>`;
-                } else {
-                    if (seat.status === 'booked') {
-                        btn.classList.add('seat-booked');
-                        btn.innerHTML = `<i class="fa-solid fa-user-check mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal opacity-90 truncate max-w-[60px]">${seat.studentName}</span>`;
-                    } else if (selectedSeatId === seat.id) {
-                        btn.classList.add('seat-selected');
-                        btn.innerHTML = `<i class="fa-solid fa-clock mb-1 text-xs animate-bounce"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">กำลังเลือก</span>`;
-                    } else {
-                        btn.classList.add('seat-available');
-                        btn.innerHTML = `<i class="fa-solid fa-chair mb-1 text-xs"></i> โต๊ะ ${seat.id}<span class="text-[9px] font-normal">ว่าง</span>`;
-                        btn.onclick = () => selectSeat(seat.id);
-                    }
-                }
-
-                if (containers[seat.group]) {
-                    containers[seat.group].appendChild(btn);
-                }
-            });
-        }
-
-        function selectSeat(seatId) {
-            if (!globalTimerActive) {
-                alert("กรุณารอแอดมินกดปุ่มเริ่มนับเวลาก่อน!");
-                return;
-            }
-
-            if (localStorage.getItem(MY_BOOKING_KEY)) {
-                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-                return;
-            }
-
-            if (isBookingClosed) {
-                alert("ระบบการจองถูกปิดโดยแอดมินแล้ว ไม่สามารถเลือกโต๊ะได้");
-                return;
-            }
-
-            if (seatsData[seatId].status === 'booked') {
-                alert("ขออภัย! โต๊ะนี้ถูกผู้อื่นจองตัดหน้าไปแล้ว");
-                return;
-            }
-
-            selectedSeatId = seatId;
-            document.getElementById('selectedSeatLabel').innerText = `โต๊ะ ${seatId}`;
-            
-            const btnSubmit = document.getElementById('btnSubmit');
-            btnSubmit.disabled = false;
-            btnSubmit.className = "px-6 py-2.5 bg-tech-cyan text-slate-950 hover:bg-sky-300 font-bold text-sm rounded-xl transition-all shadow-lg shadow-tech-cyan/20 cursor-pointer";
-
-            renderSeats();
-        }
-
-        function handleFormSubmit(e) {
-            e.preventDefault();
-
-            if (!globalTimerActive) {
-                alert("ระบบยังไม่เปิดให้จอง กรุณารอแอดมินกดเริ่มเวลา!");
-                return;
-            }
-
-            if (localStorage.getItem(MY_BOOKING_KEY)) {
-                alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-                return;
-            }
-
-            if (isBookingClosed) {
-                alert("ระบบการจองถูกปิดแล้ว ไม่สามารถส่งข้อมูลได้");
-                return;
-            }
-
-            if (!selectedSeatId) return;
-
-            const name = document.getElementById('studentName').value.trim();
-            const number = document.getElementById('studentNumber').value.trim();
-
-            if (!name || !number) {
-                alert("กรุณากรอกข้อมูลให้ครบถ้วน");
-                return;
-            }
-
-            db.ref('seats/' + selectedSeatId).transaction((seat) => {
-                if (seat && seat.status === 'available') {
-                    seat.status = 'booked';
-                    seat.studentName = name;
-                    seat.studentNumber = number;
-                    seat.timestamp = new Date().toLocaleString('th-TH');
-                    return seat;
-                } else {
-                    return;
-                }
-            }, (error, committed) => {
-                if (committed) {
-                    localStorage.setItem(MY_BOOKING_KEY, number);
-                    alert("คุณได้จองแล้วและคุณไม่มีสิทธิ์จองอีกรอบแล้ว");
-                    selectedSeatId = null;
-                    lockUIForBookedUser(number);
-                } else {
-                    alert("ขออภัย! โต๊ะนี้ถูกผู้อื่นจองตัดหน้าไปก่อนแล้ว");
-                    selectedSeatId = null;
-                    renderSeats();
-                }
-            });
-        }
-
-        function adminTriggerStartTimer() {
-            const timerEnd = Date.now() + (10 * 60 * 1000);
-            db.ref('system_status').update({
-                isActive: true,
-                timerEnd: timerEnd
-            });
-            alert("เปิดระบบและเริ่มนับเวลาถอยหลัง 10 นาทีสำเร็จ!");
-        }
-
-        function toggleBookingSystem() {
-            isBookingClosed = !isBookingClosed;
-            db.ref('system_status/isClosed').set(isBookingClosed);
-            alert(isBookingClosed ? "ปิดระบบการจองสำเร็จ" : "เปิดระบบการจองสำเร็จ");
-        }
-
-        function switchTab(tab) {
-            const userTab = document.getElementById('userTab');
-            const adminTab = document.getElementById('adminTab');
-            const btnNavUser = document.getElementById('btnNavUser');
-            const btnNavAdmin = document.getElementById('btnNavAdmin');
-
-            if (tab === 'user') {
-                userTab.classList.remove('hidden');
-                adminTab.classList.add('hidden');
-                btnNavUser.className = "px-4 py-2 rounded-lg font-medium text-sm transition-all bg-tech-cyan text-slate-950 shadow-lg shadow-tech-cyan/20";
-                btnNavAdmin.className = "px-4 py-2 rounded-lg font-medium text-sm text-slate-400 hover:text-white transition-all";
-            } else {
-                userTab.classList.add('hidden');
-                adminTab.classList.remove('hidden');
-                btnNavAdmin.className = "px-4 py-2 rounded-lg font-medium text-sm transition-all bg-tech-cyan text-slate-950 shadow-lg shadow-tech-cyan/20";
-                btnNavUser.className = "px-4 py-2 rounded-lg font-medium text-sm text-slate-400 hover:text-white transition-all";
-                renderAdminTable();
-            }
-        }
-
-        function loginAdmin() {
-            const pass = document.getElementById('adminPassword').value;
-            if (pass === "stamp 240413") {
-                document.getElementById('adminAuthBox').classList.add('hidden');
-                document.getElementById('adminContent').classList.remove('hidden');
-                renderAdminTable();
-            } else {
-                alert("รหัสผ่านไม่ถูกต้อง!");
-            }
-        }
-
-        function renderAdminTable() {
-            const tbody = document.getElementById('adminTableBody');
-            if (!tbody) return;
-            tbody.innerHTML = '';
-
-            const bookedSeats = Object.values(seatsData).filter(s => s.status === 'booked');
-
-            if (bookedSeats.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">ยังไม่มีข้อมูลการจองที่นั่ง</td></tr>`;
-                return;
-            }
-
-            bookedSeats.forEach(seat => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-slate-900/50 transition-all';
-                tr.innerHTML = `
-                    <td class="px-4 py-3 font-bold text-tech-cyan">โต๊ะ ${seat.id}</td>
-                    <td class="px-4 py-3">${seat.studentName}</td>
-                    <td class="px-4 py-3">${seat.studentNumber}</td>
-                    <td class="px-4 py-3 text-xs text-slate-400">${seat.timestamp || '-'}</td>
-                    <td class="px-4 py-3 text-center">
-                        <button onclick="cancelBooking('${seat.id}')" class="px-2.5 py-1 bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded-lg text-xs transition-all">
-                            ยกเลิก
-                        </button>
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        function cancelBooking(seatId) {
-            if (confirm(`คุณต้องการยกเลิกการจองโต๊ะ ${seatId} ใช่หรือไม่?`)) {
-                db.ref('seats/' + seatId).update({
-                    status: 'available',
-                    studentName: '',
-                    studentNumber: '',
-                    timestamp: null
-                });
-                localStorage.removeItem(MY_BOOKING_KEY);
-            }
-        }
-
-        function clearAllBookings() {
-            if (confirm("คุณแน่ใจหรือไม่ว่าต้องการรีเซ็ตเวลาและล้างข้อมูลการจองทั้งหมด?")) {
-                db.ref('seats').set(generateInitialSeats());
-                db.ref('system_status').set({ isClosed: false, isActive: false, timerEnd: null });
-                localStorage.removeItem(MY_BOOKING_KEY);
-                location.reload();
-            }
-        }
-
-        function exportToCSV() {
-            const bookedSeats = Object.values(seatsData).filter(s => s.status === 'booked');
-            if (bookedSeats.length === 0) {
-                alert("ไม่มีข้อมูลการจองสำหรับส่งออก");
-                return;
-            }
-
-            let csvContent = "\uFEFFรหัสโต๊ะ,ชื่อ-นามสกุล,เลขที่,เวลาที่จอง\n";
-            bookedSeats.forEach(s => {
-                csvContent += `"${s.id}","${s.studentName}","${s.studentNumber}","${s.timestamp}"\n`;
-            });
-
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `รายงานการจองที่นั่ง_${new Date().toISOString().slice(0,10)}.csv`;
-            a.click();
-        }
-
-        window.onload = function() {
-            initRealtimeSync();
-        };
-    </script>
+<div class="toast" id="toast"></div>
+<script src="/js/booking.js"></script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แอดมินเข้าสู่ระบบ | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="panel login-card">
+    <div style="text-align:center;margin-bottom:20px">
+      <div class="brand-logo" style="margin:0 auto 12px;width:60px;height:60px;font-size:28px">🔐</div>
+      <h2 style="justify-content:center">แอดมินเข้าสู่ระบบ</h2>
+      <p class="sub" style="text-align:center">กรุณาใส่รหัสแอดมินเพื่อจัดการระบบจองที่นั่ง</p>
+    </div>
+    <input class="input" id="codeInput" type="password" placeholder="รหัสแอดมิน" autocomplete="off">
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:8px">เข้าสู่ระบบ</button>
+    <p id="loginErr" style="color:#fca5a5;font-size:13px;text-align:center;margin-top:10px;display:none">รหัสไม่ถูกต้อง</p>
+    <p style="text-align:center;margin-top:16px"><a href="/" style="color:var(--accent);font-size:13px">← กลับหน้าจอง</a></p>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function login() {
+  const code = $('codeInput').value.trim();
+  if (!code) return;
+  const r = await fetch('/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+  const data = await r.json();
+  if (data.ok) {
+    localStorage.setItem('sf_admin_token', data.token);
+    location.href = '/admin.html';
+  } else {
+    $('loginErr').style.display = 'block';
+    $('codeInput').value = '';
+  }
+}
+$('loginBtn').addEventListener('click', login);
+$('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แดชบอร์ดแอดมิน | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">⚙️</div>
+      <div>
+        <h1>แดชบอร์ดแอดมิน</h1>
+        <p>จัดการระบบจองที่นั่งห้องเรียนวิทย์-คณิต</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a href="/" class="btn btn-ghost">หน้าจอง</a>
+      <button class="btn btn-danger" id="logoutBtn">ออกจากระบบ</button>
+    </div>
+  </div>
+
+  <div class="admin-grid">
+    <div class="stat"><div class="num" id="stTotal" style="color:var(--accent)">0</div><div class="lbl">ที่นั่งทั้งหมด</div></div>
+    <div class="stat"><div class="num" id="stBooked" style="color:var(--booked)">0</div><div class="lbl">จองแล้ว</div></div>
+    <div class="stat"><div class="num" id="stAvail" style="color:var(--green)">0</div><div class="lbl">ว่าง</div></div>
+    <div class="stat"><div class="num" id="stPhase" style="font-size:16px;line-height:1.4;padding-top:6px">รอเริ่ม</div><div class="lbl" id="stPhaseLbl">สถานะระบบ</div></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:18px">
+    <h2>การดำเนินการ</h2>
+    <p class="sub">กดเริ่มการจอง → ระบบจะนับถอยหลัง 5 วินาที แล้วเปิดจอง 10 นาที หลังจากนั้นปิดระบบโดยสมบูรณ์</p>
+    <div class="admin-actions">
+      <button class="btn btn-success" id="startBtn">▶ เริ่มการจอง (5วิ + 10นาที)</button>
+      <button class="btn btn-warn" id="closeBtn">⏹ ปิดระบบทันที</button>
+      <button class="btn btn-danger" id="resetBtn">🔄 รีเซ็ตทั้งหมด</button>
+      <span id="adminTimer" style="align-self:center;font-size:18px;font-weight:700;color:var(--cyan);font-variant-numeric:tabular-nums"></span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="live">🗺️ ผังการจองสด</div>
+    <div class="tab" data-tab="edit">✏️ จัดการผังที่นั่ง</div>
+    <div class="tab" data-tab="list">📋 รายชื่อผู้จอง</div>
+  </div>
+
+  <div class="panel" id="tab-live">
+    <h2>ผังการจองสด (อัปเดตอัตโนมัติ)</h2>
+    <p class="sub">รายชื่อผู้จองแสดงทันทีบนที่นั่ง — ง่ายต่อการดู</p>
+    <div class="seat-stage" id="liveStage"><div class="board">กระดานครู / BOARD</div></div>
+    <div class="legend">
+      <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+      <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว (มีชื่อ)</span>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="tab-edit">
+    <h2>จัดการผังที่นั่ง</h2>
+    <p class="sub">ลากเพื่อย้ายที่นั่ง · กด × มุมขวาบนเพื่อลบ · ดับเบิลคลิกเพื่อเปลี่ยนชื่อ · กดบันทึกเมื่อเสร็จ</p>
+    <div class="admin-actions">
+      <button class="btn btn-primary" id="addSeatBtn">+ เพิ่มที่นั่ง 1 เก้าอี้</button>
+      <input class="input" id="gridRows" type="number" min="1" max="12" value="4" style="width:80px;margin:0" title="แถว">
+      <input class="input" id="gridCols" type="number" min="1" max="12" value="6" style="width:80px;margin:0" title="คอลัมน์">
+      <button class="btn btn-ghost" id="gridBtn">สร้างแบบแถว (แถว×คอลัมน์)</button>
+      <button class="btn btn-danger" id="clearSeatsBtn">ล้างทั้งหมด</button>
+      <button class="btn btn-success" id="saveSeatsBtn">💾 บันทึกผังที่นั่ง</button>
+    </div>
+    <div class="seat-stage" id="editStage"><div class="board">กระดานครู / BOARD</div></div>
+  </div>
+
+  <div class="panel hidden" id="tab-list">
+    <h2>รายชื่อผู้จอง (เรียงตามเวลา)</h2>
+    <p class="sub" id="listCount">ยังไม่มีการจอง</p>
+    <div style="overflow-x:auto">
+      <table class="book-table">
+        <thead><tr><th>#</th><th>ที่นั่ง</th><th>ชื่อเล่น</th><th>เวลาจอง</th></tr></thead>
+        <tbody id="bookTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/js/admin.js"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>สรุปการจองที่นั่ง | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">S</div>
+      <div><h1>สรุปการจองที่นั่ง</h1><p>SeatFlow V2 · ห้องเรียนวิทย์-คณิต</p></div>
+    </div>
+    <div class="top-actions"><a href="/" class="btn btn-ghost">← กลับหน้าจอง</a></div>
+  </div>
+  <div class="admin-grid">
+    <div class="stat"><div class="num" id="stTotal" style="color:var(--accent)">0</div><div class="lbl">ที่นั่งทั้งหมด</div></div>
+    <div class="stat"><div class="num" id="stBooked" style="color:var(--booked)">0</div><div class="lbl">จองแล้ว</div></div>
+    <div class="stat"><div class="num" id="stAvail" style="color:var(--green)">0</div><div class="lbl">ว่าง</div></div>
+    <div class="stat"><div class="num" id="stPhase" style="font-size:16px;line-height:1.4;padding-top:6px">-</div><div class="lbl">สถานะระบบ</div></div>
+  </div>
+  <div class="panel">
+    <h2>ผังที่นั่ง (อัปเดตอัตโนมัติ)</h2>
+    <p class="sub">สีแดง = จองแล้ว · สีฟ้า = ว่าง</p>
+    <div class="seat-stage" id="stage"><div class="board">กระดานครู / BOARD</div></div>
+    <div class="legend">
+      <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+      <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว</span>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    $('stTotal').textContent = s.stats.total;
+    $('stBooked').textContent = s.stats.booked;
+    $('stAvail').textContent = s.stats.available;
+    const ph = { idle: 'รอเริ่ม', countdown: 'นับถอยหลัง', open: 'เปิดจอง', closed: 'ปิดแล้ว' }[s.phase];
+    $('stPhase').textContent = ph;
+    $('stPhase').style.color = s.phase === 'open' ? '#4ade80' : s.phase === 'closed' ? '#f87171' : 'var(--text-dim)';
+    const stage = $('stage');
+    stage.querySelectorAll('.seat').forEach(el => el.remove());
+    s.seats.forEach(seat => {
+      const el = document.createElement('div');
+      el.className = 'seat ' + seat.status;
+      el.style.left = seat.x + '%'; el.style.top = seat.y + '%';
+      el.textContent = seat.label;
+      el.style.cursor = 'default';
+      stage.appendChild(el);
+    });
+  } catch (e) {}
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>
+:root {
+  --bg-1: #061225; --bg-2: #0a1f3d; --bg-3: #0d2b52;
+  --panel: rgba(13, 35, 70, 0.72);
+  --panel-border: rgba(56, 189, 248, 0.25);
+  --accent: #38bdf8; --accent-2: #0ea5e9; --accent-deep: #0369a1;
+  --cyan: #22d3ee; --text: #e6f3ff; --text-dim: #8fb3d9;
+  --available: #1d4ed8; --available-glow: rgba(56, 189, 248, 0.5);
+  --selected: #facc15;
+  --booked: #ef233c; --booked-dark: #991b1b;
+  --green: #22c55e; --radius: 16px;
+  --font: 'Kanit', 'Sarabun', 'Segoe UI', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font); color: var(--text); min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(14, 165, 233, 0.25), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(34, 211, 238, 0.18), transparent 60%),
+    linear-gradient(160deg, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-3) 100%);
+  background-attachment: fixed; position: relative; overflow-x: hidden;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.07) 1px, transparent 1px);
+  background-size: 42px 42px; pointer-events: none; z-index: 0;
+}
+body::after {
+  content: '∑  π  √  Δ  θ  λ  ∞  ∫  ≈  →  H₂O  E=mc²  f(x)  Ω  α  β  ±  ∴';
+  position: fixed; inset: 0; font-size: 22px; color: rgba(56, 189, 248, 0.05);
+  letter-spacing: 28px; line-height: 3; white-space: pre-wrap; word-break: break-all;
+  overflow: hidden; pointer-events: none; z-index: 0; padding: 30px;
+}
+.wrap { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 22px 18px 60px; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); padding: 14px 22px; backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(2, 12, 27, 0.45); margin-bottom: 18px;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-logo {
+  width: 48px; height: 48px; border-radius: 14px;
+  background: linear-gradient(135deg, var(--cyan), var(--accent-deep));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 22px; color: #fff; box-shadow: 0 0 24px var(--available-glow);
+}
+.brand h1 { font-size: 22px; font-weight: 700; letter-spacing: .5px; }
+.brand p { font-size: 12px; color: var(--text-dim); }
+.top-actions { display: flex; gap: 10px; }
+.btn {
+  font-family: var(--font); border: none; cursor: pointer; padding: 10px 18px;
+  border-radius: 12px; font-size: 14px; font-weight: 600;
+  transition: transform .15s, box-shadow .15s, filter .15s;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+.btn:active { transform: translateY(0); }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-deep)); color: #fff; box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4); }
+.btn-ghost { background: rgba(56, 189, 248, 0.1); color: var(--accent); border: 1px solid var(--panel-border); }
+.btn-danger { background: linear-gradient(135deg, #ef4444, #b91c1c); color: #fff; }
+.btn-success { background: linear-gradient(135deg, #22c55e, #15803d); color: #fff; }
+.btn-warn { background: linear-gradient(135deg, #f59e0b, #b45309); color: #fff; }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; filter: none; }
+.panel {
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); padding: 20px; backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(2, 12, 27, 0.4);
+}
+.panel h2 { font-size: 18px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.panel .sub { font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
+.grid-main { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .grid-main { grid-template-columns: 1fr; } }
+.status-banner {
+  border-radius: var(--radius); padding: 16px 20px; margin-bottom: 18px; text-align: center;
+  font-weight: 600; border: 1px solid var(--panel-border); background: var(--panel); backdrop-filter: blur(10px);
+}
+.status-banner.idle { color: var(--text-dim); }
+.status-banner.countdown { border-color: var(--selected); color: var(--selected); box-shadow: 0 0 30px rgba(250, 204, 21, 0.25); }
+.status-banner.open { border-color: var(--green); color: var(--green); box-shadow: 0 0 30px rgba(34, 197, 94, 0.25); }
+.status-banner.closed { border-color: var(--booked); color: #fca5a5; background: rgba(153, 27, 27, 0.25); }
+.big-timer { font-size: 44px; font-weight: 800; letter-spacing: 2px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.timer-bar { height: 8px; border-radius: 99px; background: rgba(255,255,255,0.1); margin-top: 12px; overflow: hidden; }
+.timer-bar > div { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--accent)); transition: width 1s linear; }
+.seat-stage {
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
+  background:
+    linear-gradient(rgba(56,189,248,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.08) 1px, transparent 1px),
+    rgba(4, 16, 36, 0.6);
+  background-size: 30px 30px; border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 14px; overflow: hidden; user-select: none;
+}
+.board {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(180deg, #0c4a6e, #082f49); border: 2px solid var(--accent);
+  color: #bae6fd; font-size: 13px; font-weight: 600; padding: 8px 40px; border-radius: 8px;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.35); letter-spacing: 4px;
+}
+.seat {
+  position: absolute; width: 52px; height: 52px; transform: translate(-50%, -50%);
+  border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; cursor: pointer;
+  transition: transform .12s, box-shadow .12s; border: 2px solid transparent;
+}
+.seat.available { background: linear-gradient(145deg, #3b82f6, #1e40af); color: #fff; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.45); }
+.seat.available:hover { transform: translate(-50%, -50%) scale(1.12); box-shadow: 0 0 22px var(--available-glow); z-index: 5; }
+.seat.selected { background: linear-gradient(145deg, #fde047, #eab308); color: #422006; border-color: #fff; box-shadow: 0 0 26px rgba(250, 204, 21, 0.7); z-index: 6; animation: pulse 1s infinite; }
+.seat.booked { background: linear-gradient(145deg, #f87171, var(--booked-dark)); color: #fff; cursor: not-allowed; box-shadow: 0 2px 10px rgba(239, 35, 60, 0.4); }
+.seat.booked .seat-name { display: block; font-size: 9px; font-weight: 600; margin-top: 1px; opacity: .95; max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat .seat-name { display: none; }
+@keyframes pulse { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-50%,-50%) scale(1.1); } }
+.legend { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); }
+.legend .dot { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+.side { display: flex; flex-direction: column; gap: 16px; }
+.stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { background: rgba(4, 16, 36, 0.5); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; text-align: center; }
+.stat .num { font-size: 26px; font-weight: 800; }
+.stat .lbl { font-size: 11px; color: var(--text-dim); }
+.stat.avail .num { color: var(--accent); }
+.stat.booked .num { color: var(--booked); }
+.selected-box .seat-tag { display: inline-block; background: linear-gradient(135deg, #fde047, #eab308); color: #422006; padding: 6px 16px; border-radius: 10px; font-weight: 800; font-size: 18px; margin: 8px 0; }
+.input {
+  width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--panel-border);
+  background: rgba(4, 16, 36, 0.6); color: var(--text); font-family: var(--font); font-size: 15px; margin: 8px 0; outline: none;
+}
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
+.input::placeholder { color: var(--text-dim); }
+.my-booking { background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(14,165,233,0.15)); border: 1px solid var(--green); border-radius: 12px; padding: 14px; }
+.my-booking .seat-big { font-size: 30px; font-weight: 800; color: var(--green); }
+.modal-overlay { position: fixed; inset: 0; background: rgba(2, 8, 20, 0.75); backdrop-filter: blur(6px); z-index: 50; display: none; align-items: center; justify-content: center; padding: 20px; }
+.modal-overlay.show { display: flex; animation: fadeIn .25s; }
+.modal { background: linear-gradient(160deg, #0b2142, #081830); border: 1px solid var(--panel-border); border-radius: 20px; padding: 30px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.6); animation: popIn .3s cubic-bezier(.2,1.4,.4,1); }
+.modal .icon { font-size: 54px; margin-bottom: 10px; }
+.modal h3 { font-size: 20px; margin-bottom: 8px; }
+.modal p { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin-bottom: 18px; }
+.modal.danger { border-color: var(--booked); }
+.modal.danger h3 { color: #fca5a5; }
+.modal.success { border-color: var(--green); }
+.modal.success h3 { color: #86efac; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { from { transform: scale(.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.admin-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+@media (max-width: 800px) { .admin-grid { grid-template-columns: repeat(2, 1fr); } }
+.admin-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.tab { padding: 9px 16px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; background: rgba(56,189,248,0.08); color: var(--text-dim); border: 1px solid transparent; }
+.tab.active { background: linear-gradient(135deg, var(--accent), var(--accent-deep)); color: #fff; }
+.hidden { display: none !important; }
+.seat.editing { cursor: grab; }
+.seat.editing:active { cursor: grabbing; }
+.seat.editing .del-x { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; background: #ef4444; color: #fff; border-radius: 50%; font-size: 12px; display: none; align-items: center; justify-content: center; cursor: pointer; }
+.seat.editing:hover .del-x { display: flex; }
+table.book-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.book-table th, table.book-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(56,189,248,0.15); }
+table.book-table th { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+table.book-table tr:hover { background: rgba(56,189,248,0.06); }
+.login-card { max-width: 400px; margin: 8vh auto 0; }
+.login-card input { text-align: center; font-size: 18px; letter-spacing: 3px; }
+.empty { text-align: center; color: var(--text-dim); padding: 40px 10px; font-size: 14px; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(4,16,36,0.95); border: 1px solid var(--accent); padding: 12px 22px; border-radius: 12px; z-index: 100; font-size: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: none; }
+.toast.show { display: block; animation: popIn .3s; }
+let deviceId = localStorage.getItem('sf_device_id');
+if (!deviceId) {
+  deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  localStorage.setItem('sf_device_id', deviceId);
+}
+let selectedSeatId = null;
+let state = null;
+let alreadyShown = false;
+const $ = id => document.getElementById(id);
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._tm); t._tm = setTimeout(() => t.classList.remove('show'), 2500);
+}
+function closeModal(id) { $(id).classList.remove('show'); }
+function showModal(id) { $(id).classList.add('show'); }
+
+function renderStatus() {
+  const banner = $('statusBanner'), text = $('statusText'), big = $('bigTimer'), fill = $('timerFill');
+  banner.className = 'status-banner ' + state.phase;
+  big.classList.add('hidden'); fill.style.width = '0%';
+  if (state.phase === 'idle') {
+    text.innerHTML = '⏳ ระบบยังไม่เปิดให้จอง — กรุณารอแอดมินกด <b>เริ่มการจอง</b>';
+  } else if (state.phase === 'countdown') {
+    text.innerHTML = '🚀 เตรียมตัว! เปิดจองในอีก...';
+    big.classList.remove('hidden'); big.textContent = state.countdownRemaining; big.style.color = '#facc15';
+  } else if (state.phase === 'open') {
+    text.innerHTML = '🟢 ระบบเปิดให้จองแล้ว — เหลือเวลาจอง';
+    big.classList.remove('hidden'); big.textContent = fmtTime(state.openRemaining); big.style.color = '#4ade80';
+    fill.style.width = (state.openRemaining / state.openTotal) * 100 + '%';
+  } else {
+    text.innerHTML = '🔒 ระบบปิดแล้ว — เวลาจองหมด (ไม่มีเงื่อนไขใดๆ)';
+  }
+}
+
+function renderSeats() {
+  const stage = $('seatStage');
+  stage.querySelectorAll('.seat').forEach(el => el.remove());
+  state.seats.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'seat ' + s.status;
+    if (s.id === selectedSeatId && s.status === 'available') el.classList.add('selected');
+    el.style.left = s.x + '%'; el.style.top = s.y + '%';
+    el.innerHTML = s.label + '<span class="seat-name">' + (s.bookedBy || '') + '</span>';
+    el.dataset.id = s.id;
+    el.addEventListener('click', () => onSeatClick(s));
+    stage.appendChild(el);
+  });
+}
+
+function onSeatClick(s) {
+  if (s.status === 'booked') { showModal('modalTaken'); return; }
+  if (state.phase !== 'open') {
+    if (state.phase === 'closed') showModal('modalClosed');
+    else toast('ระบบยังไม่เปิดให้จอง กรุณารอ');
+    return;
+  }
+  if (state.alreadyBooked) { showModal('modalAlready'); return; }
+  selectedSeatId = (selectedSeatId === s.id) ? null : s.id;
+  updateBookBox(); renderSeats();
+}
+
+function updateBookBox() {
+  const disp = $('selectedSeatDisplay'), btn = $('confirmBtn');
+  const seat = state.seats.find(s => s.id === selectedSeatId);
+  if (seat) {
+    disp.innerHTML = 'ที่นั่ง: <span class="seat-tag">' + seat.label + '</span>';
+    btn.disabled = false;
+  } else {
+    disp.textContent = 'ยังไม่ได้เลือกที่นั่ง';
+    btn.disabled = true;
+  }
+}
+
+$('confirmBtn').addEventListener('click', async () => {
+  const nickname = $('nicknameInput').value.trim();
+  if (!selectedSeatId) { toast('กรุณาเลือกที่นั่งก่อน'); return; }
+  if (!nickname) { toast('กรุณาใส่ชื่อเล่น'); $('nicknameInput').focus(); return; }
+  const btn = $('confirmBtn');
+  btn.disabled = true; btn.textContent = 'กำลังจอง...';
+  try {
+    const r = await fetch('/api/book', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seatId: selectedSeatId, nickname, deviceId })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      $('successSeat').textContent = data.booking.label;
+      $('successName').textContent = data.booking.nickname;
+      showModal('modalSuccess');
+      selectedSeatId = null; $('nicknameInput').value = '';
+      await pollState();
+    } else {
+      if (data.reason === 'already_booked') {
+        $('alreadySeat').textContent = data.seat || '-';
+        showModal('modalAlready');
+      } else if (data.reason === 'seat_taken') {
+        showModal('modalTaken'); selectedSeatId = null;
+      } else {
+        showModal('modalClosed');
+      }
+      await pollState();
+    }
+  } catch (e) { toast('เชื่อมต่อผิดพลาด ลองใหม่'); }
+  finally { btn.disabled = false; btn.textContent = 'ยืนยันการจอง'; }
+});
+
+async function pollState() {
+  try {
+    const r = await fetch('/api/state?deviceId=' + encodeURIComponent(deviceId));
+    state = await r.json();
+    renderStatus(); renderSeats(); updateBookBox();
+    $('statAvail').textContent = state.stats.available;
+    $('statBooked').textContent = state.stats.booked;
+    if (state.alreadyBooked && state.mySeat) {
+      $('myBookingBox').classList.remove('hidden');
+      $('bookBox').classList.add('hidden');
+      $('mySeatLabel').textContent = 'ที่นั่ง ' + state.mySeat.label;
+      if (!alreadyShown) {
+        alreadyShown = true;
+        $('alreadySeat').textContent = state.mySeat.label;
+        setTimeout(() => showModal('modalAlready'), 600);
+      }
+    } else {
+      $('myBookingBox').classList.add('hidden');
+      $('bookBox').classList.remove('hidden');
+    }
+    if (selectedSeatId) {
+      const s = state.seats.find(x => x.id === selectedSeatId);
+      if (!s || s.status !== 'available') { selectedSeatId = null; updateBookBox(); }
+    }
+  } catch (e) { /* ข้าม */ }
+}
+pollState();
+setInterval(pollState, 1000);
+const token = localStorage.getItem('sf_admin_token');
+if (!token) location.href = '/admin-login.html';
+const $ = id => document.getElementById(id);
+let adminData = null;
+let editSeats = [];
+let dragSeat = null;
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._tm); t._tm = setTimeout(() => t.classList.remove('show'), 2500);
+}
+async function api(path, opts = {}) {
+  const sep = path.includes('?') ? '&' : '?';
+  const r = await fetch(path + sep + 'token=' + encodeURIComponent(token), opts);
+  return r.json();
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    ['live', 'edit', 'list'].forEach(name => {
+      $('tab-' + name).classList.toggle('hidden', name !== tab.dataset.tab);
+    });
+    if (tab.dataset.tab === 'edit') loadEditStage();
+  });
+});
+
+async function pollAdmin() {
+  const data = await api('/api/admin/data');
+  if (!data.ok) { localStorage.removeItem('sf_admin_token'); location.href = '/admin-login.html'; return; }
+  adminData = data;
+  $('stTotal').textContent = data.stats.total;
+  $('stBooked').textContent = data.stats.booked;
+  $('stAvail').textContent = data.stats.available;
+  const phaseEl = $('stPhase'), timer = $('adminTimer');
+  timer.textContent = '';
+  if (data.phase === 'idle') { phaseEl.textContent = 'รอเริ่ม'; phaseEl.style.color = 'var(--text-dim)'; }
+  else if (data.phase === 'countdown') { phaseEl.textContent = 'นับถอยหลัง'; phaseEl.style.color = '#facc15'; timer.textContent = data.countdownRemaining + ' วิ'; }
+  else if (data.phase === 'open') { phaseEl.textContent = 'เปิดจอง'; phaseEl.style.color = 'var(--green)'; timer.textContent = 'เหลือ ' + fmtTime(data.openRemaining); }
+  else { phaseEl.textContent = 'ปิดแล้ว'; phaseEl.style.color = 'var(--booked)'; }
+  renderLiveMap(); renderList();
+}
+
+function renderLiveMap() {
+  const stage = $('liveStage');
+  stage.querySelectorAll('.seat').forEach(el => el.remove());
+  if (!adminData.seats.length) {
+    stage.insertAdjacentHTML('beforeend', '<div class="empty" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">ยังไม่มีที่นั่ง กรุณาไปแท็บ "จัดการผังที่นั่ง"</div>');
+    return;
+  }
+  adminData.seats.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'seat ' + s.status;
+    el.style.left = s.x + '%'; el.style.top = s.y + '%';
+    el.innerHTML = s.label + '<span class="seat-name">' + (s.bookedBy || '') + '</span>';
+    stage.appendChild(el);
+  });
+}
+
+function renderList() {
+  const tb = $('bookTbody'); tb.innerHTML = '';
+  $('listCount').textContent = 'มีทั้งหมด ' + adminData.bookings.length + ' คน';
+  if (!adminData.bookings.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="empty">ยังไม่มีการจอง</td></tr>';
+    return;
+  }
+  adminData.bookings.forEach((b, i) => {
+    const d = new Date(b.bookedAt);
+    const t = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    tb.insertAdjacentHTML('beforeend',
+      '<tr><td>' + (i + 1) + '</td><td><b style="color:var(--accent)">' + b.label + '</b></td><td>' + b.nickname + '</td><td>' + t + '</td></tr>');
+  });
+}
+
+$('startBtn').addEventListener('click', async () => {
+  if (!confirm('เริ่มการจอง? ระบบจะนับถอยหลัง 5 วินาที แล้วเปิดจอง 10 นาที หลังจากนั้นปิดอัตโนมัติ')) return;
+  const r = await api('/api/admin/start', { method: 'POST' });
+  if (r.ok) { toast('เริ่มระบบจองแล้ว'); pollAdmin(); }
+});
+$('closeBtn').addEventListener('click', async () => {
+  if (!confirm('ปิดระบบทันที? จะไม่สามารถจองเพิ่มได้อีก')) return;
+  const r = await api('/api/admin/close', { method: 'POST' });
+  if (r.ok) { toast('ปิดระบบแล้ว'); pollAdmin(); }
+});
+$('resetBtn').addEventListener('click', async () => {
+  if (!confirm('รีเซ็ตทั้งหมด? การจองทั้งหมดจะถูกลบและระบบกลับไปรอเริ่ม')) return;
+  const r = await api('/api/admin/reset', { method: 'POST' });
+  if (r.ok) { toast('รีเซ็ตแล้ว'); pollAdmin(); }
+});
+$('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('sf_admin_token');
+  location.href = '/admin-login.html';
+});
+
+function loadEditStage() {
+  editSeats = adminData.seats.map(s => ({ id: s.id, label: s.label, x: s.x, y: s.y }));
+  renderEditStage();
+}
+function renderEditStage() {
+  const stage = $('editStage');
+  stage.querySelectorAll('.seat').forEach(el => el.remove());
+  editSeats.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'seat available editing';
+    el.style.left = s.x + '%'; el.style.top = s.y + '%';
+    el.innerHTML = s.label + '<span class="del-x" data-id="' + s.id + '">×</span>';
+    el.dataset.id = s.id;
+    stage.appendChild(el);
+  });
+}
+
+$('addSeatBtn').addEventListener('click', () => {
+  const id = 'seat_' + Date.now() + Math.random().toString(36).slice(2, 6);
+  editSeats.push({ id, label: 'S' + (editSeats.length + 1), x: 20 + Math.random() * 60, y: 30 + Math.random() * 55 });
+  renderEditStage();
+});
+
+$('gridBtn').addEventListener('click', () => {
+  const rows = Math.max(1, Math.min(12, parseInt($('gridRows').value) || 4));
+  const cols = Math.max(1, Math.min(12, parseInt($('gridCols').value) || 6));
+  if (editSeats.length && !confirm('จะสร้างแบบแถวใหม่ ที่นั่งเดิมจะถูกแทนที่ (การจองที่มีอยู่จะถูกล้าง) ดำเนินการต่อ?')) return;
+  editSeats = [];
+  const xStart = 15, xEnd = 85, yStart = 28, yEnd = 88;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = cols === 1 ? 50 : xStart + (c * (xEnd - xStart) / (cols - 1));
+      const y = rows === 1 ? 55 : yStart + (r * (yEnd - yStart) / (rows - 1));
+      editSeats.push({
+        id: 'seat_' + Date.now() + '_' + r + '_' + c,
+        label: String.fromCharCode(65 + r) + (c + 1),
+        x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10
+      });
+    }
+  }
+  renderEditStage();
+  toast('สร้างที่นั่ง ' + (rows * cols) + ' ที่ เรียบร้อย กดบันทึกเพื่อเก็บ');
+});
+
+$('clearSeatsBtn').addEventListener('click', () => {
+  if (!confirm('ล้างที่นั่งทั้งหมด? (การจองที่มีอยู่จะถูกล้างเมื่อบันทึก)')) return;
+  editSeats = []; renderEditStage();
+});
+
+$('saveSeatsBtn').addEventListener('click', async () => {
+  const r = await api('/api/admin/save-seats', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seats: editSeats })
+  });
+  if (r.ok) { toast('บันทึกผังที่นั่งแล้ว (' + r.count + ' ที่)'); pollAdmin(); }
+  else toast('บันทึกไม่สำเร็จ: ' + (r.message || ''));
+});
+
+$('editStage').addEventListener('click', e => {
+  if (e.target.classList.contains('del-x')) {
+    const id = e.target.dataset.id;
+    editSeats = editSeats.filter(s => s.id !== id);
+    renderEditStage();
+  }
+});
+
+$('editStage').addEventListener('dblclick', e => {
+  const seatEl = e.target.closest('.seat.editing');
+  if (!seatEl || e.target.classList.contains('del-x')) return;
+  const s = editSeats.find(x => x.id === seatEl.dataset.id);
+  const name = prompt('ชื่อ/รหัสที่นั่ง:', s.label);
+  if (name && name.trim()) { s.label = name.trim().slice(0, 8); renderEditStage(); }
+});
+
+$('editStage').addEventListener('pointerdown', e => {
+  const seatEl = e.target.closest('.seat.editing');
+  if (!seatEl || e.target.classList.contains('del-x')) return;
+  e.preventDefault();
+  dragSeat = editSeats.find(s => s.id === seatEl.dataset.id);
+  seatEl.setPointerCapture(e.pointerId);
+});
+$('editStage').addEventListener('pointermove', e => {
+  if (!dragSeat) return;
+  const rect = $('editStage').getBoundingClientRect();
+  let x = ((e.clientX - rect.left) / rect.width) * 100;
+  let y = ((e.clientY - rect.top) / rect.height) * 100;
+  x = Math.max(6, Math.min(94, x)); y = Math.max(18, Math.min(94, y));
+  dragSeat.x = Math.round(x * 10) / 10; dragSeat.y = Math.round(y * 10) / 10;
+  const el = $('editStage').querySelector('.seat[data-id="' + dragSeat.id + '"]');
+  if (el) { el.style.left = dragSeat.x + '%'; el.style.top = dragSeat.y + '%'; }
+});
+window.addEventListener('pointerup', () => { dragSeat = null; });
+
+pollAdmin();
+setInterval(pollAdmin, 2000);
+cd seatflow-v2
+npm install
+npm start
+# เปิด http://localhost:3000
