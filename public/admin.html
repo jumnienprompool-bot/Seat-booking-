@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แดชบอร์ดแอดมิน | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">⚙️</div>
+      <div>
+        <h1>แดชบอร์ดแอดมิน</h1>
+        <p>จัดการระบบจองที่นั่งห้องเรียนวิทย์-คณิต</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a href="/" class="btn btn-ghost">หน้าจอง</a>
+      <button class="btn btn-danger" id="logoutBtn">ออกจากระบบ</button>
+    </div>
+  </div>
+
+  <!-- สถิติ -->
+  <div class="admin-grid">
+    <div class="stat"><div class="num" id="stTotal" style="color:var(--accent)">0</div><div class="lbl">ที่นั่งทั้งหมด</div></div>
+    <div class="stat"><div class="num" id="stBooked" style="color:var(--booked)">0</div><div class="lbl">จองแล้ว</div></div>
+    <div class="stat"><div class="num" id="stAvail" style="color:var(--green)">0</div><div class="lbl">ว่าง</div></div>
+    <div class="stat"><div class="num" id="stPhase" style="font-size:16px;line-height:1.4;padding-top:6px">รอเริ่ม</div><div class="lbl" id="stPhaseLbl">สถานะระบบ</div></div>
+  </div>
+
+  <!-- ปุ่มดำเนินการแอดมิน -->
+  <div class="panel" style="margin-bottom:18px">
+    <h2>การดำเนินการ</h2>
+    <p class="sub">กดเริ่มการจอง → ระบบจะนับถอยหลัง 5 วินาที แล้วเปิดจอง 10 นาที หลังจากนั้นปิดระบบโดยสมบูรณ์</p>
+    <div class="admin-actions">
+      <button class="btn btn-success" id="startBtn">▶ เริ่มการจอง (5วิ + 10นาที)</button>
+      <button class="btn btn-warn" id="closeBtn">⏹ ปิดระบบทันที</button>
+      <button class="btn btn-danger" id="resetBtn">🔄 รีเซ็ตทั้งหมด</button>
+      <span id="adminTimer" style="align-self:center;font-size:18px;font-weight:700;color:var(--cyan);font-variant-numeric:tabular-nums"></span>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="live">🗺️ ผังการจองสด</div>
+    <div class="tab" data-tab="edit">✏️ จัดการผังที่นั่ง</div>
+    <div class="tab" data-tab="list">📋 รายชื่อผู้จอง</div>
+  </div>
+
+  <!-- Tab: ผังการจองสด (ฟีเจอร์ 4) -->
+  <div class="panel" id="tab-live">
+    <h2>ผังการจองสด (อัปเดตอัตโนมัติ)</h2>
+    <p class="sub">รายชื่อผู้จองแสดงทันทีบนที่นั่ง — ง่ายต่อการดู</p>
+    <div class="seat-stage" id="liveStage"><div class="board">กระดานครู / BOARD</div></div>
+    <div class="legend">
+      <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+      <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว (มีชื่อ)</span>
+    </div>
+  </div>
+
+  <!-- Tab: จัดการผังที่นั่ง -->
+  <div class="panel hidden" id="tab-edit">
+    <h2>จัดการผังที่นั่ง</h2>
+    <p class="sub">ลากเพื่อย้ายที่นั่ง · กด × มุมขวาบนเพื่อลบ · กดบันทึกเมื่อเสร็จ</p>
+    <div class="admin-actions">
+      <button class="btn btn-primary" id="addSeatBtn">+ เพิ่มที่นั่ง 1 เก้าอี้</button>
+      <input class="input" id="gridRows" type="number" min="1" max="12" value="4" style="width:80px;margin:0" title="แถว">
+      <input class="input" id="gridCols" type="number" min="1" max="12" value="6" style="width:80px;margin:0" title="คอลัมน์">
+      <button class="btn btn-ghost" id="gridBtn">สร้างแบบแถว (แถว×คอลัมน์)</button>
+      <button class="btn btn-danger" id="clearSeatsBtn">ล้างทั้งหมด</button>
+      <button class="btn btn-success" id="saveSeatsBtn">💾 บันทึกผังที่นั่ง</button>
+    </div>
+    <div class="seat-stage" id="editStage"><div class="board">กระดานครู / BOARD</div></div>
+  </div>
+
+  <!-- Tab: รายชื่อผู้จอง -->
+  <div class="panel hidden" id="tab-list">
+    <h2>รายชื่อผู้จอง (เรียงตามเวลา)</h2>
+    <p class="sub" id="listCount">ยังไม่มีการจอง</p>
+    <div style="overflow-x:auto">
+      <table class="book-table">
+        <thead><tr><th>#</th><th>ที่นั่ง</th><th>ชื่อเล่น</th><th>เวลาจอง</th></tr></thead>
+        <tbody id="bookTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/js/admin.js"></script>
+</body>
+</html>

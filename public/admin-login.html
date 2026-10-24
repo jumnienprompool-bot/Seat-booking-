@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แอดมินเข้าสู่ระบบ | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="panel login-card">
+    <div style="text-align:center;margin-bottom:20px">
+      <div class="brand-logo" style="margin:0 auto 12px;width:60px;height:60px;font-size:28px">🔐</div>
+      <h2 style="justify-content:center">แอดมินเข้าสู่ระบบ</h2>
+      <p class="sub" style="text-align:center">กรุณาใส่รหัสแอดมินเพื่อจัดการระบบจองที่นั่ง</p>
+    </div>
+    <input class="input" id="codeInput" type="password" placeholder="รหัสแอดมิน" autocomplete="off">
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:8px">เข้าสู่ระบบ</button>
+    <p id="loginErr" style="color:#fca5a5;font-size:13px;text-align:center;margin-top:10px;display:none">รหัสไม่ถูกต้อง</p>
+    <p style="text-align:center;margin-top:16px"><a href="/" style="color:var(--accent);font-size:13px">← กลับหน้าจอง</a></p>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function login() {
+  const code = $('codeInput').value.trim();
+  if (!code) return;
+  const r = await fetch('/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+  const data = await r.json();
+  if (data.ok) {
+    localStorage.setItem('sf_admin_token', data.token);
+    location.href = '/admin.html';
+  } else {
+    $('loginErr').style.display = 'block';
+    $('codeInput').value = '';
+  }
+}
+$('loginBtn').addEventListener('click', login);
+$('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>

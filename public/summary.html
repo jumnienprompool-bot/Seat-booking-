@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>สรุปการจองที่นั่ง | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">S</div>
+      <div><h1>สรุปการจองที่นั่ง</h1><p>SeatFlow V2 · ห้องเรียนวิทย์-คณิต</p></div>
+    </div>
+    <div class="top-actions"><a href="/" class="btn btn-ghost">← กลับหน้าจอง</a></div>
+  </div>
+
+  <div class="admin-grid">
+    <div class="stat"><div class="num" id="stTotal" style="color:var(--accent)">0</div><div class="lbl">ที่นั่งทั้งหมด</div></div>
+    <div class="stat"><div class="num" id="stBooked" style="color:var(--booked)">0</div><div class="lbl">จองแล้ว</div></div>
+    <div class="stat"><div class="num" id="stAvail" style="color:var(--green)">0</div><div class="lbl">ว่าง</div></div>
+    <div class="stat"><div class="num" id="stPhase" style="font-size:16px;line-height:1.4;padding-top:6px">-</div><div class="lbl">สถานะระบบ</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>ผังที่นั่ง (อัปเดตอัตโนมัติ)</h2>
+    <p class="sub">สีแดง = จองแล้ว · สีฟ้า = ว่าง</p>
+    <div class="seat-stage" id="stage"><div class="board">กระดานครู / BOARD</div></div>
+    <div class="legend">
+      <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+      <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว</span>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    $('stTotal').textContent = s.stats.total;
+    $('stBooked').textContent = s.stats.booked;
+    $('stAvail').textContent = s.stats.available;
+    const ph = { idle: 'รอเริ่ม', countdown: 'นับถอยหลัง', open: 'เปิดจอง', closed: 'ปิดแล้ว' }[s.phase];
+    $('stPhase').textContent = ph;
+    $('stPhase').style.color = s.phase === 'open' ? '#4ade80' : s.phase === 'closed' ? '#f87171' : 'var(--text-dim)';
+    const stage = $('stage');
+    stage.querySelectorAll('.seat').forEach(el => el.remove());
+    s.seats.forEach(seat => {
+      const el = document.createElement('div');
+      el.className = 'seat ' + seat.status;
+      el.style.left = seat.x + '%'; el.style.top = seat.y + '%';
+      el.textContent = seat.label;
+      el.style.cursor = 'default';
+      stage.appendChild(el);
+    });
+  } catch (e) {}
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>
