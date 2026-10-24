@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>จองที่นั่งห้องเรียน | SeatFlow V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-logo">S</div>
+      <div>
+        <h1>ระบบจองที่นั่งห้องเรียน</h1>
+        <p>ห้องเรียนวิทยาศาสตร์-คณิตศาสตร์ · SeatFlow V2</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a href="/summary.html" class="btn btn-ghost">สรุป</a>
+      <a href="/admin-login.html" class="btn btn-ghost">แอดมิน</a>
+    </div>
+  </div>
+
+  <div id="statusBanner" class="status-banner idle">
+    <div id="statusText">ระบบยังไม่เปิดให้จอง กรุณารอแอดมินเริ่มการจอง</div>
+    <div id="bigTimer" class="big-timer hidden">--:--</div>
+    <div class="timer-bar"><div id="timerFill" style="width:0%"></div></div>
+  </div>
+
+  <div class="grid-main">
+    <div class="panel">
+      <h2>ผังที่นั่งห้องเรียน</h2>
+      <p class="sub">กดที่นั่งที่ต้องการ (สีฟ้า = ว่าง · สีแดง = จองแล้ว · สีเหลือง = ที่คุณเลือก)</p>
+      <div class="seat-stage" id="seatStage">
+        <div class="board">กระดานครู / BOARD</div>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:linear-gradient(145deg,#3b82f6,#1e40af)"></span>ว่าง</span>
+        <span><span class="dot" style="background:linear-gradient(145deg,#fde047,#eab308)"></span>ที่คุณเลือก</span>
+        <span><span class="dot" style="background:linear-gradient(145deg,#f87171,#991b1b)"></span>จองแล้ว</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>สถานะที่นั่ง</h2>
+        <div class="stat-cards" style="margin-top:12px">
+          <div class="stat avail"><div class="num" id="statAvail">0</div><div class="lbl">ที่ว่าง</div></div>
+          <div class="stat booked"><div class="num" id="statBooked">0</div><div class="lbl">จองแล้ว</div></div>
+        </div>
+      </div>
+
+      <div class="panel my-booking hidden" id="myBookingBox">
+        <h2 style="color:#86efac">คุณจองที่นั่งแล้ว</h2>
+        <div class="seat-big" id="mySeatLabel">-</div>
+        <p style="font-size:13px;color:var(--text-dim);margin-top:6px">คุณไม่มีโอกาสจองเป็นครั้งที่สอง</p>
+      </div>
+
+      <div class="panel selected-box" id="bookBox">
+        <h2>ที่นั่งที่เลือก</h2>
+        <div id="selectedSeatDisplay" style="color:var(--text-dim);font-size:13px;margin:8px 0">ยังไม่ได้เลือกที่นั่ง</div>
+        <input class="input" id="nicknameInput" type="text" placeholder="ใส่ชื่อเล่นของคุณ" maxlength="20">
+        <button class="btn btn-primary" id="confirmBtn" style="width:100%;justify-content:center" disabled>ยืนยันการจอง</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalAlready">
+  <div class="modal danger">
+    <div class="icon">⛔</div>
+    <h3>คุณจองแล้ว</h3>
+    <p>คุณได้จองที่นั่งไปแล้ว และคุณไม่มีโอกาสเป็นครั้งที่สองแล้ว<br>ที่นั่งของคุณ: <b id="alreadySeat" style="color:#fca5a5">-</b></p>
+    <button class="btn btn-primary" onclick="closeModal('modalAlready')">เข้าใจแล้ว</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalSuccess">
+  <div class="modal success">
+    <div class="icon">✅</div>
+    <h3>จองที่นั่งสำเร็จ</h3>
+    <p>ที่นั่ง <b id="successSeat" style="color:#86efac;font-size:20px">-</b><br>ชื่อ: <b id="successName">-</b></p>
+    <button class="btn btn-success" onclick="closeModal('modalSuccess')">ตกลง</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalTaken">
+  <div class="modal danger">
+    <div class="icon">❌</div>
+    <h3>ที่นั่งนี้ถูกจองไปแล้ว</h3>
+    <p>กรุณาเลือกที่นั่งอื่นที่ยังว่าง (สีฟ้า)</p>
+    <button class="btn btn-primary" onclick="closeModal('modalTaken')">ตกลง</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalClosed">
+  <div class="modal danger">
+    <div class="icon">🔒</div>
+    <h3>ระบบปิดแล้ว</h3>
+    <p>เวลาจองหมด ระบบปิดโดยสมบูรณ์ ไม่มีเงื่อนไขใดๆ</p>
+    <button class="btn btn-primary" onclick="closeModal('modalClosed')">ตกลง</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/js/booking.js"></script>
+</body>
+</html>
