@@ -53,9 +53,31 @@ function renderLiveMap() {
     const el = document.createElement('div');
     el.className = 'seat ' + s.status;
     el.style.left = s.x + '%'; el.style.top = s.y + '%';
+    el.style.cursor = 'pointer';
     el.innerHTML = s.label + '<span class="seat-name">' + (s.bookedBy || '') + '</span>';
+    el.addEventListener('click', () => onLiveSeatClick(s));
     stage.appendChild(el);
   });
+}
+async function onLiveSeatClick(s) {
+  if (s.status === 'available') {
+    const name = prompt('จองที่นั่ง ' + s.label + ' ให้ใคร?\n(พิมพ์ชื่อ หรือปล่อยว่าง = "แอดมินจองไว้")', '');
+    const r = await api('/api/admin/reserve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seatId: s.id, nickname: name ? name.trim() : '' })
+    });
+    if (r.ok) toast('จองที่นั่ง ' + s.label + ' ไว้แล้ว');
+    else toast('ไม่สำเร็จ: ' + (r.message || ''));
+  } else {
+    if (!confirm('ยกเลิกการจองที่นั่ง ' + s.label + ' (' + (s.bookedBy || '') + ')?')) return;
+    const r = await api('/api/admin/unreserve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seatId: s.id })
+    });
+    if (r.ok) toast('ยกเลิกการจองที่นั่ง ' + s.label + ' แล้ว');
+    else toast('ไม่สำเร็จ: ' + (r.message || ''));
+  }
+  pollAdmin();
 }
 function renderList() {
   const tb = $('bookTbody'); tb.innerHTML = '';
