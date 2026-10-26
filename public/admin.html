@@ -10,7 +10,6 @@
 </head>
 <body>
 <div class="wrap">
-
   <div class="topbar">
     <div class="brand">
       <div class="brand-logo">⚙️</div>
@@ -25,7 +24,6 @@
     </div>
   </div>
 
-  <!-- สถิติ -->
   <div class="admin-grid">
     <div class="stat"><div class="num" id="stTotal" style="color:var(--accent)">0</div><div class="lbl">ที่นั่งทั้งหมด</div></div>
     <div class="stat"><div class="num" id="stBooked" style="color:var(--booked)">0</div><div class="lbl">จองแล้ว</div></div>
@@ -33,7 +31,6 @@
     <div class="stat"><div class="num" id="stPhase" style="font-size:16px;line-height:1.4;padding-top:6px">รอเริ่ม</div><div class="lbl" id="stPhaseLbl">สถานะระบบ</div></div>
   </div>
 
-  <!-- ปุ่มดำเนินการแอดมิน -->
   <div class="panel" style="margin-bottom:18px">
     <h2>การดำเนินการ</h2>
     <p class="sub">กดเริ่มการจอง → ระบบจะนับถอยหลัง 5 วินาที แล้วเปิดจอง 10 นาที หลังจากนั้นปิดระบบโดยสมบูรณ์</p>
@@ -45,14 +42,12 @@
     </div>
   </div>
 
-  <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" data-tab="live">🗺️ ผังการจองสด</div>
     <div class="tab" data-tab="edit">✏️ จัดการผังที่นั่ง</div>
     <div class="tab" data-tab="list">📋 รายชื่อผู้จอง</div>
   </div>
 
-  <!-- Tab: ผังการจองสด (ฟีเจอร์ 4) -->
   <div class="panel" id="tab-live">
     <h2>ผังการจองสด (อัปเดตอัตโนมัติ)</h2>
     <p class="sub">รายชื่อผู้จองแสดงทันทีบนที่นั่ง — ง่ายต่อการดู</p>
@@ -63,22 +58,22 @@
     </div>
   </div>
 
-  <!-- Tab: จัดการผังที่นั่ง -->
   <div class="panel hidden" id="tab-edit">
     <h2>จัดการผังที่นั่ง</h2>
-    <p class="sub">ลากเพื่อย้ายที่นั่ง · กด × มุมขวาบนเพื่อลบ · กดบันทึกเมื่อเสร็จ</p>
+    <p class="sub">ลากเพื่อย้ายที่นั่ง · กด × มุมขวาบนเพื่อลบ · ดับเบิลคลิกเพื่อเปลี่ยนชื่อ · กดบันทึกเมื่อเสร็จ</p>
     <div class="admin-actions">
       <button class="btn btn-primary" id="addSeatBtn">+ เพิ่มที่นั่ง 1 เก้าอี้</button>
-      <input class="input" id="gridRows" type="number" min="1" max="12" value="4" style="width:80px;margin:0" title="แถว">
-      <input class="input" id="gridCols" type="number" min="1" max="12" value="6" style="width:80px;margin:0" title="คอลัมน์">
-      <button class="btn btn-ghost" id="gridBtn">สร้างแบบแถว (แถว×คอลัมน์)</button>
+      <input class="input" id="gridRows" type="number" min="1" max="12" value="4" style="width:80px;margin:0" title="แถวต่อกลุ่ม">
+      <input class="input" id="gridCols" type="number" min="1" max="6" value="3" style="width:80px;margin:0" title="คอลัมน์ต่อกลุ่ม">
+      <button class="btn btn-ghost" id="gridBtn">สร้างแบบแถว (ติดกัน)</button>
+      <button class="btn btn-ghost" id="groupBtn">🪑 สร้างแบบ 3 กลุ่ม (มีทางเดิน)</button>
       <button class="btn btn-danger" id="clearSeatsBtn">ล้างทั้งหมด</button>
       <button class="btn btn-success" id="saveSeatsBtn">💾 บันทึกผังที่นั่ง</button>
     </div>
+    <p class="sub" style="margin-top:-8px">💡 แบบ 3 กลุ่ม: ใช้ช่อง แถว=4, คอลัมน์=3 แล้วกดปุ่ม "สร้างแบบ 3 กลุ่ม" จะได้ 3 กลุ่ม ห่างกัน มีทางเดินกลาง รวม 36 ที่นั่ง</p>
     <div class="seat-stage" id="editStage"><div class="board">กระดานครู / BOARD</div></div>
   </div>
 
-  <!-- Tab: รายชื่อผู้จอง -->
   <div class="panel hidden" id="tab-list">
     <h2>รายชื่อผู้จอง (เรียงตามเวลา)</h2>
     <p class="sub" id="listCount">ยังไม่มีการจอง</p>
@@ -89,11 +84,9 @@
       </table>
     </div>
   </div>
-
 </div>
 
 <div class="toast" id="toast"></div>
-
 <script src="/js/admin.js"></script>
 </body>
 </html>
